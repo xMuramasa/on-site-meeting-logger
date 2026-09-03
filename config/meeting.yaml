@@ -1,0 +1,61 @@
+# Packaged pipeline defaults. Override with `--config path/to/overlay.yaml`;
+# overlays are merged key-by-key, so an overlay only needs the values it changes.
+
+meeting:
+  title: Reunión semanal
+  language: es
+  location_unknown_text: No consignado en la grabación
+  # Adjust these sections in an overlay to match the meeting structure.
+  sections:
+    - Comercial / B2B
+    - Marketing / RRSS
+    - UX / Producto
+    - Ingeniería / Operaciones
+  prior_follow_up_section: Seguimiento del acta anterior
+
+transcription:
+  provider: faster-whisper
+  model: medium
+  device: auto
+  compute_type: auto
+  language: es
+  vad_filter: true
+  beam_size: 5
+
+reasoning:
+  protocol: openai-compatible
+  model: qwen3-8b-instruct
+  base_url: http://127.0.0.1:8080/v1
+  api_key_env: MEETING_MODEL_API_KEY
+  context_window: 32768
+  temperature: 0.1
+  max_output_tokens: 6144
+  timeout_seconds: 300.0
+  max_retries: 2
+  max_response_bytes: 4194304
+
+chunking:
+  target_tokens: 6000
+  overlap_seconds: 45.0
+  chars_per_token: 3.6
+
+pdf:
+  chromium_path: null
+  page_size: Letter
+  margin_inches: 1.0
+  timeout_seconds: 180
+
+validation:
+  require_letter_pages: true
+  require_text_layer: true
+  min_text_chars: 800
+  max_trailing_page_chars: 120
+  required_phrases:
+    - ACTA DE REUNIÓN
+    - Participantes
+
+# Add organization-specific spellings in a local overlay, not in this shared default.
+glossary: {}
+
+# Add a reference roster in a local overlay. It never proves current attendance.
+reference_participants: []

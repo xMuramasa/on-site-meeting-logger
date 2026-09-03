@@ -1,0 +1,227 @@
+{
+  "schema_version": "1",
+  "meeting": {
+    "title": "Reunión semanal",
+    "date": "2026-08-31",
+    "location": "No consignado en la grabación",
+    "language": "es",
+    "recording_duration_seconds": 3132.309333,
+    "recording_filename": "meeting.m4a",
+    "recording_sha256": "48b8a4f7a4a10d9092d3b4615bc7c39494f6eb0d885684b05064117bc5974140",
+    "previous_acta_filename": "previous-acta.pdf",
+    "previous_acta_sha256": "9362102bdbd7198c5c88f9a72d84ac57f981db62a49494b711682de857f5af50",
+    "previous_acta_date": "2026-08-24"
+  },
+  "participants_note": "La grabación no permite confirmar individualmente la asistencia. Lista de referencia del acta del 24 de agosto; validar antes de distribuir.",
+  "participants": [
+    { "name": "Martín", "email": "martin@example.com", "attendance": "unconfirmed", "source": "previous_acta" },
+    { "name": "C. Negrete", "email": "cnegrete@example.com", "attendance": "unconfirmed", "source": "previous_acta" },
+    { "name": "Pablo Garcés", "email": "pgarces@example.com", "attendance": "unconfirmed", "source": "previous_acta" },
+    { "name": "Oscar", "email": "oscar@example.com", "attendance": "unconfirmed", "source": "previous_acta" }
+  ],
+  "continuity_note": "El acta del 24 de agosto se usó para normalizar los nombres Equipo, Producto, Obvio, Caja La Araucana y Salcobrand, y para revisar compromisos anteriores. Las atribuciones basadas solo en esa continuidad se marcan como “confirmar”.",
+  "sections": [
+    {
+      "number": 1,
+      "title": "Comercial / B2B",
+      "paragraphs": [
+        {
+          "text": "La reunión con **Obvio** prevista en el acta anterior ya se realizó. Se envió un kit para evaluar el flujo completo.",
+          "evidence": [{ "start": 17.0, "end": 93.0, "segment_ids": [3, 4, 5] }]
+        },
+        {
+          "text": "La **Universidad de los Andes** recibió el material y sigue sin responder; corresponde un segundo contacto.",
+          "evidence": [{ "start": 93.0, "end": 140.0 }]
+        }
+      ],
+      "actions": [
+        {
+          "id": "A-1",
+          "outcome": "Dar seguimiento a Obvio, evaluar el kit y el concurso de septiembre.",
+          "owner": "Natalia",
+          "owner_status": "explicit",
+          "due_date": null,
+          "due_status": "unresolved",
+          "dependencies": [],
+          "acceptance": "Obvio confirma la inclusión del kit en el concurso.",
+          "evidence": [{ "start": 17.0, "end": 93.0 }],
+          "prior_context": null
+        },
+        {
+          "id": "A-2",
+          "outcome": "Realizar el segundo contacto con la Universidad de los Andes y coordinar con ANID.",
+          "owner": null,
+          "owner_status": "unresolved",
+          "due_date": null,
+          "due_status": "relative",
+          "due_expression": "esta semana",
+          "dependencies": [],
+          "acceptance": "Existe respuesta registrada de la universidad.",
+          "evidence": [{ "start": 93.0, "end": 140.0 }],
+          "prior_context": "Pendiente del acta del 24 de agosto de 2026."
+        },
+        {
+          "id": "A-3",
+          "outcome": "Preparar la reunión con Salcobrand: materiales, redes y listado de locales.",
+          "owner": "Pablo Garcés",
+          "owner_status": "continuity_based",
+          "due_date": "2026-09-01",
+          "due_status": "explicit",
+          "dependencies": ["A-1"],
+          "acceptance": "Materiales y listado de 62 ubicaciones entregados antes de la reunión.",
+          "evidence": [{ "start": 151.0, "end": 186.0 }],
+          "prior_context": "Responsable previo según el acta del 24 de agosto de 2026."
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "title": "Marketing / RRSS",
+      "paragraphs": [
+        {
+          "text": "La semana contempla planificación y grabación de contenidos, edición y publicación.",
+          "evidence": [{ "start": 591.0, "end": 607.0 }]
+        }
+      ],
+      "actions": [
+        {
+          "id": "A-5",
+          "outcome": "Documentar los correos y triggers de e-commerce/backend y reunir a las áreas involucradas.",
+          "owner": null,
+          "owner_status": "unresolved",
+          "due_date": null,
+          "due_status": "unresolved",
+          "dependencies": [],
+          "acceptance": "Existe un documento con el mapa de correos y sus disparadores.",
+          "evidence": [{ "start": 609.0, "end": 733.0 }],
+          "prior_context": "Continúa el pendiente del acta del 24 de agosto de 2026."
+        }
+      ]
+    },
+    {
+      "number": 3,
+      "title": "UX / Producto",
+      "paragraphs": [
+        {
+          "text": "El testeo no moderado con **cinco usuarios** fue completado; los participantes distinguieron predisposición genética de diagnóstico actual.",
+          "evidence": [{ "start": 819.0, "end": 890.0 }]
+        }
+      ],
+      "actions": [
+        {
+          "id": "A-6",
+          "outcome": "Presentar y revisar las pantallas de alta fidelidad.",
+          "owner": "C. Negrete",
+          "owner_status": "continuity_based",
+          "due_date": null,
+          "due_status": "relative",
+          "due_expression": "esta semana",
+          "dependencies": [],
+          "acceptance": "Las pantallas quedan revisadas y comentadas por el equipo.",
+          "evidence": [{ "start": 890.0, "end": 947.0 }],
+          "prior_context": "Responsable previo según el acta del 24 de agosto de 2026."
+        }
+      ]
+    },
+    {
+      "number": 4,
+      "title": "Ingeniería / Operaciones",
+      "paragraphs": [
+        {
+          "text": "Se mantendrá durante la semana el proceso actual de liberación de resultados; la prioridad entre automatización y migración sigue pendiente.",
+          "evidence": [
+            { "start": 248.0, "end": 377.0 },
+            { "start": 2955.0, "end": 3124.0 }
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "id": "A-4",
+          "outcome": "Decidir formalmente entre migración de infraestructura y automatización del flujo.",
+          "owner": null,
+          "owner_status": "unresolved",
+          "due_date": null,
+          "due_status": "unresolved",
+          "dependencies": [],
+          "acceptance": "Decisión registrada antes de cambios mayores en KMS/LMS.",
+          "evidence": [{ "start": 2944.0, "end": 3124.0 }],
+          "prior_context": null
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "id": "D-1",
+      "statement": "Mantener esta semana el flujo actual de liberación de resultados.",
+      "section": "Ingeniería / Operaciones",
+      "evidence": [{ "start": 248.0, "end": 262.0 }],
+      "prior_context": null
+    },
+    {
+      "id": "D-2",
+      "statement": "Mantener visible que la predisposición genética no equivale a un diagnóstico.",
+      "section": "Comercial / B2B",
+      "evidence": [{ "start": 873.0, "end": 890.0 }],
+      "prior_context": null
+    }
+  ],
+  "proposals": [
+    {
+      "id": "P-1",
+      "statement": "Evaluar un callback HTTP/API hacia Lab Manager para automatizar los laboratorios externos.",
+      "section": "Ingeniería / Operaciones",
+      "status": "open",
+      "evidence": [{ "start": 2714.0, "end": 2944.0 }],
+      "prior_context": null
+    }
+  ],
+  "risks": [
+    {
+      "id": "R-1",
+      "statement": "La reposición de cajas demora más de un mes y quedan aproximadamente 164 unidades sin armar.",
+      "section": "Ingeniería / Operaciones",
+      "evidence": [{ "start": 428.0, "end": 578.0 }]
+    }
+  ],
+  "open_questions": [
+    {
+      "id": "Q-1",
+      "question": "¿Quién registra por soporte la eliminación del SNP crítico de celiaquía?",
+      "section": "Ingeniería / Operaciones",
+      "evidence": [{ "start": 2468.0, "end": 2500.0 }]
+    }
+  ],
+  "prior_follow_ups": [
+    {
+      "item": "Reunión con Obvio",
+      "status": "avanzo",
+      "detail": "Reunión realizada, kit enviado y concurso de septiembre acordado.",
+      "provenance": "both",
+      "evidence": [{ "start": 17.0, "end": 93.0 }]
+    },
+    {
+      "item": "Comprar teléfono B2B",
+      "status": "pendiente",
+      "detail": "Continúa adeudado.",
+      "provenance": "both",
+      "evidence": [{ "start": 186.0, "end": 233.0 }]
+    },
+    {
+      "item": "Gestionar que el laboratorio realice el pedido de Salcobrand",
+      "status": "pendiente",
+      "detail": "No se mencionó en la grabación; se conserva del acta anterior.",
+      "provenance": "previous_acta",
+      "evidence": []
+    }
+  ],
+  "quality_warnings": [
+    {
+      "kind": "no_reliable_diarization",
+      "note": "La grabación no permite confirmar asistencia ni atribuir intervenciones.",
+      "evidence": []
+    }
+  ],
+  "sources_note": "Grabación y transcripción de la reunión del 31 de agosto de 2026; Acta_Reunion_Semanal_2026-08-24.pdf como contexto de continuidad. La grabación no incluye diarización fiable; validar participantes y responsables antes de distribuir."
+}

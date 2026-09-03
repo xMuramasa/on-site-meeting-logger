@@ -1,0 +1,87 @@
+# Acta de Reunión
+
+- **Reunión:** {{ acta.meeting.title }}
+- **Fecha:** {{ acta.meeting.long_date() }}
+- **Lugar:** {{ acta.meeting.location }}
+- **Duración:** {{ acta.meeting.recording_duration_seconds | int }} segundos
+
+## Participantes
+
+{{ acta.participants_note }}
+
+| Participante | Correo | Asistencia |
+|---|---|---|
+{% for participant in acta.participants -%}
+| {{ participant.name }} | {{ participant.email or "—" }} | {{ "Confirmada" if participant.attendance == "confirmed" else "Por confirmar" }} |
+{% endfor %}
+
+{% if acta.continuity_note %}> **Contexto de continuidad.** {{ acta.continuity_note }}{% endif %}
+
+{% for section in acta.sections %}
+## {{ section.number }}. {{ section.title }}
+
+{% for paragraph in section.paragraphs -%}
+{{ paragraph.text }}{% if paragraph.evidence %} {{ paragraph.evidence | evidence }}{% endif %}
+
+{% endfor -%}
+{% for action in section.actions -%}
+- [{{ action.id }}] **Tarea:** {{ action.outcome }} **Responsable:** {{ action.owner_display() }}. **Fecha:** {{ action.due_display() }}. **Criterio de cierre:** {{ action.acceptance }} {{ action.evidence | evidence }}
+{% endfor %}
+{% endfor %}
+
+## Decisiones
+
+{% for item in acta.decisions -%}
+- [{{ item.id }}] {{ item.statement }} {{ item.evidence | evidence }}
+{% else -%}
+- No se registraron decisiones explícitas.
+{% endfor %}
+
+## Propuestas abiertas
+
+{% for item in acta.proposals -%}
+- [{{ item.id }}] {{ item.statement }} {{ item.evidence | evidence }}
+{% else -%}
+- No se registraron propuestas abiertas.
+{% endfor %}
+
+## Riesgos y preguntas abiertas
+
+{% for item in acta.risks -%}
+- [{{ item.id }}] **Riesgo:** {{ item.statement }} {{ item.evidence | evidence }}
+{% endfor -%}
+{% for item in acta.open_questions -%}
+- [{{ item.id }}] **Pregunta:** {{ item.question }} {{ item.evidence | evidence }}
+{% endfor %}
+
+{% if acta.prior_follow_ups %}
+## Seguimiento del acta anterior
+
+| Compromiso | Estado | Detalle |
+|---|---|---|
+{% for item in acta.prior_follow_ups -%}
+| {{ item.item }} | {{ item.status_label() }} | {{ item.detail }}{% if item.evidence %} {{ item.evidence | evidence }}{% endif %} |
+{% endfor %}
+{% endif %}
+
+## Acuerdos y próximos pasos
+
+{% for section in acta.sections -%}
+{% for action in section.actions -%}
+- [{{ action.id }}] {{ action.outcome }} — {{ action.owner_display() }}; {{ action.due_display() }}.
+{% endfor -%}
+{% endfor %}
+
+{% if acta.quality_warnings %}
+## Limitaciones
+
+{% for warning in acta.quality_warnings -%}
+- {{ warning.note }}{% if warning.evidence %} {{ warning.evidence | evidence }}{% endif %}
+{% endfor %}
+{% endif %}
+
+---
+
+{{ acta.sources_note }}
+
+Documento confidencial

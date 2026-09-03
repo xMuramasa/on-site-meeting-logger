@@ -1,0 +1,5 @@
+reasoning:
+  model: Qwen3-8B
+  base_url: http://127.0.0.1:8080/v1
+  context_window: 32768
+  temperature: 0.1

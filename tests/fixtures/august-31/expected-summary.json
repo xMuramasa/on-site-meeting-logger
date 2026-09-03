@@ -1,0 +1,110 @@
+{
+  "_comment": [
+    "Semantic acceptance baseline captured from the approved manual August 31 output.",
+    "Deliberately semantic, not byte-for-byte: generated prose is allowed to differ.",
+    "Sources are referenced by SHA-256 only; no audio, no full transcript, no credentials."
+  ],
+  "meeting": {
+    "title": "Reunión semanal",
+    "date": "2026-08-31",
+    "location": "No consignado en la grabación",
+    "language": "es",
+    "language_probability_min": 0.85
+  },
+  "sources": {
+    "audio": {
+      "filename": "Reunion-semanal-aug-31-2026.m4a",
+      "sha256": "48b8a4f7a4a10d9092d3b4615bc7c39494f6eb0d885684b05064117bc5974140",
+      "size_bytes": 26076523,
+      "codec_name": "aac",
+      "sample_rate": 48000,
+      "channels": 1,
+      "duration_seconds": 3132.309333,
+      "duration_tolerance_seconds": 1.0
+    },
+    "previous_acta": {
+      "filename": "Acta_Reunion_Semanal_2026-08-24.pdf",
+      "sha256": "9362102bdbd7198c5c88f9a72d84ac57f981db62a49494b711682de857f5af50",
+      "pages": 2,
+      "has_text_layer": true
+    },
+    "approved_pdf": {
+      "filename": "Acta_Reunion_Semanal_2026-08-31.pdf",
+      "sha256": "2c950864266e7629471e91375de7c57c1ee56706f8dc5f9a34329ecd89f210cd",
+      "pages": 5,
+      "page_size_points": [612, 792]
+    }
+  },
+  "transcript": {
+    "segment_count_min": 1200,
+    "coverage_ratio_min": 0.9,
+    "first_segment_starts_at": 0.0,
+    "monotonic_segments": true
+  },
+  "sections": [
+    "Comercial / B2B",
+    "Marketing / RRSS",
+    "UX / Producto",
+    "Ingeniería / Operaciones",
+    "Seguimiento del acta del 24 de agosto"
+  ],
+  "required_headings": [
+    "ACTA DE REUNIÓN",
+    "Participantes",
+    "Acuerdos y próximos pasos"
+  ],
+  "combined_sections": ["Ingeniería / Operaciones"],
+  "normalized_proper_nouns": [
+    "Equipo",
+    "Producto",
+    "Obvio",
+    "Caja La Araucana",
+    "Salcobrand",
+    "Universidad de los Andes",
+    "Nextflow",
+    "Aurora",
+    "KMS",
+    "LMS"
+  ],
+  "reference_participants": [
+    { "name": "Martín", "email": "martin@example.com" },
+    { "name": "C. Negrete", "email": "cnegrete@example.com" },
+    { "name": "N. Gilardoni", "email": "ngilardoni@example.com" },
+    { "name": "A. González", "email": "agonzalez@example.com" },
+    { "name": "Pablo Garcés", "email": "pgarces@example.com" },
+    { "name": "Oscar", "email": "oscar@example.com" },
+    { "name": "Cristian Chala", "email": "cchala@example.com" },
+    { "name": "Santiago Mujica", "email": "santiago.mujica@astortech.io" }
+  ],
+  "participant_attendance_expectation": "unconfirmed",
+  "prior_follow_ups": [
+    "Reunión con Obvio",
+    "Universidad de los Andes",
+    "Caja La Araucana / Producto",
+    "Reunión legal de protección de datos",
+    "Comprar teléfono B2B",
+    "Testeo con cinco usuarios",
+    "Viaje de entrega de resultados",
+    "Visualización de SNP críticos",
+    "Pruebas del chat",
+    "Reducir costos de arquitectura"
+  ],
+  "quality_warnings": [
+    {
+      "kind": "no_reliable_diarization",
+      "note": "La grabación no permite confirmar asistencia ni atribuir intervenciones."
+    }
+  ],
+  "known_quality_warning_range": { "start": 0.0, "end": 30.0 },
+  "invariants": {
+    "every_decision_has_evidence": true,
+    "every_action_has_evidence": true,
+    "unknown_owners_remain_unresolved": true,
+    "unknown_dates_remain_unresolved": true,
+    "proposals_never_promoted_to_decisions": true,
+    "prior_participants_never_auto_confirmed": true,
+    "markdown_html_semantic_parity": true
+  },
+  "footer_text": "Documento confidencial",
+  "transcript_excerpt_for_tests": "Estoy grabando, entonces quedamos en que comercial"
+}

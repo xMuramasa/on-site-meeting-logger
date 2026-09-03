@@ -1,0 +1,16 @@
+.DS_Store
+.venv/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+.env
+.coverage
+htmlcov/
+build/
+dist/
+acceptance-output/
+webui/node_modules/
+webui/*.tsbuildinfo
+webui/vite.config.js
+webui/vite.config.d.ts

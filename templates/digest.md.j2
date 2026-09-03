@@ -1,0 +1,44 @@
+# Digest
+
+**Reunión:** {{ acta.meeting.title }}
+**Fecha:** {{ acta.meeting.long_date() }}
+
+## Resumen por área
+
+{% for section in acta.sections %}
+### {{ section.title }}
+{% for paragraph in section.paragraphs -%}
+- {{ paragraph.text }}{% if paragraph.evidence %} {{ paragraph.evidence | evidence }}{% endif %}
+{% endfor -%}
+{% endfor %}
+
+## Decisiones
+{% for item in acta.decisions -%}
+- [{{ item.id }}] {{ item.statement }} {{ item.evidence | evidence }}
+{% else -%}
+- Ninguna decisión explícita registrada.
+{% endfor %}
+
+## Propuestas
+{% for item in acta.proposals -%}
+- [{{ item.id }}] {{ item.statement }} {{ item.evidence | evidence }}
+{% else -%}
+- Ninguna propuesta abierta registrada.
+{% endfor %}
+
+## Acciones
+{% for section in acta.sections -%}
+{% for action in section.actions -%}
+- [{{ action.id }}] {{ action.outcome }} — **Responsable:** {{ action.owner_display() }}; **fecha:** {{ action.due_display() }}; **cierre:** {{ action.acceptance }} {{ action.evidence | evidence }}
+{% endfor -%}
+{% endfor %}
+
+## Riesgos y preguntas
+{% for item in acta.risks -%}
+- [{{ item.id }}] Riesgo: {{ item.statement }} {{ item.evidence | evidence }}
+{% endfor -%}
+{% for item in acta.open_questions -%}
+- [{{ item.id }}] Pregunta: {{ item.question }} {{ item.evidence | evidence }}
+{% endfor %}
+
+{{ acta.sources_note }}
