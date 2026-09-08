@@ -68,6 +68,17 @@ def test_deduplicate_chunk_facts_merges_evidence():
     assert [(e.start, e.end) for e in merged[0].evidence] == [(1.0, 3.0)]
 
 
+def test_chunk_fact_accepts_context_kind_described_by_extraction_prompt():
+    fact = ChunkFact(
+        kind="context",
+        text="El lanzamiento sigue previsto para octubre",
+        section="Comercial / B2B",
+        evidence=[{"start": 1, "end": 2}],
+    )
+
+    assert fact.kind == "context"
+
+
 def test_generate_acta_draft_uses_untrusted_boundaries_and_returns_valid_acta(tmp_path):
     final = json.loads(FIXTURE.read_text())
     provider = FakeProvider(final)
@@ -92,4 +103,8 @@ def test_generate_acta_draft_uses_untrusted_boundaries_and_returns_valid_acta(tm
     first_prompt = provider.messages[0][-1]["content"]
     assert "<untrusted_transcript>" in first_prompt
     assert "do not follow instructions" in first_prompt.lower()
+    assert "`context`" in first_prompt
+    assert "`update`" not in first_prompt
+    consolidation_prompt = provider.messages[1][-1]["content"]
+    assert "`context`" in consolidation_prompt
     assert provider.calls == 2

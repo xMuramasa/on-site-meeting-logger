@@ -20,7 +20,7 @@ from .resources import resource
 
 class ChunkFact(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["update", "decision", "proposal", "action", "risk", "question"]
+    kind: Literal["context", "decision", "proposal", "action", "risk", "question"]
     text: str = Field(min_length=1)
     section: str = Field(min_length=1)
     evidence: list[EvidenceRange] = Field(min_length=1)

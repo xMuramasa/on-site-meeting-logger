@@ -10,6 +10,8 @@ REGLAS ABSOLUTAS
    equivalentes, une sus rangos de evidencia; no descartes ninguno.
 4. Una `proposal` nunca se convierte en `decision`. Las propuestas sin cierre van a
    `proposals`, con `status: "open"`.
+   Los hechos `context` solo sustentan los párrafos de su sección; no los conviertas en
+   decisiones, propuestas, acciones, riesgos ni preguntas abiertas.
 5. Responsables y fechas:
    - Responsable nombrado en la reunión → `owner_status: "explicit"`.
    - Responsable que solo viene del acta anterior → `owner_status: "continuity_based"`
