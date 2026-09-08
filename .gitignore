@@ -10,6 +10,15 @@ htmlcov/
 build/
 dist/
 acceptance-output/
+# Meeting recordings, transcripts, reviews, and generated actas are local-only.
+meeting-artifacts/
+recordings/
+*.m4a
+*.mp4
+*.mp3
+*.ogg
+*.wav
+*.webm
 webui/node_modules/
 webui/*.tsbuildinfo
 webui/vite.config.js

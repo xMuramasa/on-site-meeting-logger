@@ -19,3 +19,15 @@ For hosted use:
 
 The CLI never deletes source material automatically. Retention deletion should be a separate,
 audited operation rather than part of processing.
+
+## Repository boundary
+
+Keep all meeting output outside the repository. This includes source recordings, transcripts,
+model extraction data, `review.yaml`, validation reports, and rendered actas. The default output
+root is `/Users/muramasa/Recordings`; choose another local directory only when it is also outside
+the checkout.
+
+Before staging repository changes, run `make hygiene`. It only reads Git's tracked-file list and
+fails when it finds a recording, a known generated meeting file, or content below
+`meeting-artifacts/`, `recordings/`, or a `YYYY-MM-DD` meeting directory; it never removes
+meeting data.

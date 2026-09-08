@@ -8,7 +8,7 @@ MODEL_FILE ?= Qwen3-8B-Q4_K_M.gguf
 MODEL_PORT ?= 8080
 MODEL_CONTEXT ?= 32768
 
-.PHONY: help setup model ui open frontend-install frontend-dev frontend-build test lint check build doctor
+.PHONY: help setup model ui open frontend-install frontend-dev frontend-build test lint hygiene check build doctor
 
 help: ## Show available commands
 	@printf "Meeting Pipeline\n\n"
@@ -56,9 +56,13 @@ lint: ## Run Python lint and frontend type checking
 	uv run ruff check .
 	cd webui && bun run typecheck
 
+hygiene: ## Confirm meeting artifacts are not tracked by Git
+	uv run python scripts/check_repository_hygiene.py
+
 check: ## Run all test, lint, type-check, and frontend build gates
 	uv run pytest -o addopts='' -q
 	uv run ruff check .
+	$(MAKE) hygiene
 	cd webui && bun run test
 	cd webui && bun run build
 

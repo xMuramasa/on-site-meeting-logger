@@ -77,6 +77,18 @@ Finalize:
 
 Finalization renders Markdown and HTML, exports the PDF, and refuses completion if validation fails.
 
+## Artifact boundary
+
+Recordings, transcripts, review files, intermediate JSON, and generated actas are local meeting
+artifacts, not repository content. Keep the output root outside this checkout (the default is
+`/Users/muramasa/Recordings`); never pass a directory inside the repository to `--output-root`.
+
+The repository ignores common recording formats and the `meeting-artifacts/` and `recordings/`
+directories as a backstop. Run `make hygiene` before staging changes; it fails if a recording, a
+known generated meeting file such as `transcript.md`, or a file under either artifact directory is
+tracked. It also rejects files under the pipeline's `YYYY-MM-DD` meeting directories. The check is
+read-only and never deletes files.
+
 ## Useful commands
 
     uv run meeting inspect --audio /path/to/meeting.m4a

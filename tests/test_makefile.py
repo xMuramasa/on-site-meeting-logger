@@ -36,3 +36,9 @@ def test_check_target_runs_python_and_frontend_gates():
     assert "uv run ruff check" in output
     assert "bun run test" in output
     assert "bun run build" in output
+
+
+def test_hygiene_target_runs_the_repository_artifact_check():
+    output = make("hygiene")
+
+    assert "scripts/check_repository_hygiene.py" in output
