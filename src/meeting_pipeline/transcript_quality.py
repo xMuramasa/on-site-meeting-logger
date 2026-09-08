@@ -21,10 +21,6 @@ def detect_degraded_ranges(
     """Return warnings and the ranges that must not feed downstream reasoning."""
     normalized_segments = [_normalized(segment.text) for segment in segments]
     tail_loop = _tail_loop(segments, normalized_segments)
-    repeated: dict[str, list[TranscriptSegment]] = {}
-    for segment, normalized in zip(segments, normalized_segments, strict=True):
-        if len(normalized.split()) >= 3:
-            repeated.setdefault(normalized, []).append(segment)
 
     warnings: list[TranscriptQualityWarning] = []
     degraded: list[EvidenceRange] = []
@@ -40,9 +36,7 @@ def detect_degraded_ranges(
         )
         degraded.append(tail_loop)
     repeated_segment_ids: set[int] = set()
-    for matching in repeated.values():
-        if len(matching) < 2:
-            continue
+    for matching in _repeated_segment_runs(segments, normalized_segments):
         if tail_ids and all(item.id in tail_ids for item in matching):
             continue
         evidence = [
@@ -99,6 +93,23 @@ def detect_degraded_ranges(
     return warnings, _merge_ranges(degraded)
 
 
+def _repeated_segment_runs(
+    segments: list[TranscriptSegment], normalized_segments: list[str]
+) -> list[list[TranscriptSegment]]:
+    """Find adjacent verbatim loops without penalizing a phrase repeated later."""
+    runs: list[list[TranscriptSegment]] = []
+    start = 0
+    for end in range(1, len(segments) + 1):
+        if end < len(segments) and normalized_segments[end] == normalized_segments[start]:
+            continue
+        matching = segments[start:end]
+        word_count = len(normalized_segments[start].split()) if matching else 0
+        if (word_count >= 3 and len(matching) >= 2) or (word_count > 0 and len(matching) >= 4):
+            runs.append(matching)
+        start = end
+    return runs
+
+
 def _tail_loop(
     segments: list[TranscriptSegment], normalized_segments: list[str]
 ) -> EvidenceRange | None:
@@ -118,13 +129,19 @@ def _tail_loop(
 def _repeated_ngram_segment_ids(
     segments: list[TranscriptSegment], normalized_segments: list[str]
 ) -> dict[tuple[str, ...], set[int]]:
-    matches: dict[tuple[str, ...], set[int]] = {}
+    matches: dict[tuple[str, ...], list[int]] = {}
     for index, text in enumerate(normalized_segments):
         tokens = text.split()
         for start in range(len(tokens) - 4):
             ngram = tuple(tokens[start : start + 5])
-            matches.setdefault(ngram, set()).add(segments[index].id)
-    return {ngram: indices for ngram, indices in matches.items() if len(indices) > 1}
+            positions = matches.setdefault(ngram, [])
+            if not positions or positions[-1] != index:
+                positions.append(index)
+    return {
+        ngram: {segments[index].id for index in positions}
+        for ngram, positions in matches.items()
+        if len(positions) >= 3 and positions[-1] - positions[0] <= len(positions) + 1
+    }
 
 
 def _coverage_gaps(
@@ -142,16 +159,18 @@ def _coverage_gaps(
 def _low_diversity_range(
     segments: list[TranscriptSegment], normalized_segments: list[str]
 ) -> EvidenceRange | None:
-    tokens = [token for text in normalized_segments for token in text.split()]
-    if len(tokens) < MIN_LEXICAL_DIVERSITY_TOKENS:
-        return None
-    if len(set(tokens)) / len(tokens) >= MIN_LEXICAL_DIVERSITY_RATIO:
-        return None
-    return EvidenceRange(
-        start=segments[0].start,
-        end=segments[-1].end,
-        segment_ids=[segment.id for segment in segments],
-    )
+    for segment, text in zip(segments, normalized_segments, strict=True):
+        tokens = text.split()
+        if len(tokens) < MIN_LEXICAL_DIVERSITY_TOKENS:
+            continue
+        if len(set(tokens)) / len(tokens) >= MIN_LEXICAL_DIVERSITY_RATIO:
+            continue
+        return EvidenceRange(
+            start=segment.start,
+            end=segment.end,
+            segment_ids=[segment.id],
+        )
+    return None
 
 
 def _merge_ranges(ranges: list[EvidenceRange]) -> list[EvidenceRange]:

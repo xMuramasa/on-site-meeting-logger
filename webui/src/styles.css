@@ -123,6 +123,10 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .field-grid label { display: grid; grid-template-columns: 45px 1fr; align-items: center; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
 .field-grid label > span { margin: 0; height: 40px; display: grid; place-items: center; background: var(--muted); color: var(--foreground); }
 .field-grid input { border: 0; outline: 0; padding: 0 11px; font-size: 12px; min-width: 0; }
+.field-grid .relative-date-field { grid-template: "action date" auto "expression date" auto / minmax(0, 1fr) auto; align-items: stretch; }
+.field-grid .relative-date-field > span { grid-area: action; height: auto; min-height: 32px; padding: 8px 11px 2px; display: block; background: transparent; text-transform: none; letter-spacing: 0; line-height: 1.35; }
+.relative-date-field > small { grid-area: expression; padding: 0 11px 8px; color: var(--muted-foreground); font-size: 10px; }
+.relative-date-field > input { grid-area: date; min-height: 58px; border-left: 1px solid var(--border); }
 .proper-nouns textarea { width: 100%; min-height: 78px; resize: vertical; border: 1px solid var(--border); border-radius: 7px; padding: 10px 11px; color: var(--foreground); outline: 0; font-size: 12px; line-height: 1.5; }
 .proper-nouns textarea:focus { border-color: var(--ring); box-shadow: 0 0 0 3px rgba(163,163,163,.18); }
 .proper-nouns small { display: block; color: var(--muted-foreground); font-size: 10px; margin: 5px 2px 0; }

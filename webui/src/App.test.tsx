@@ -33,6 +33,7 @@ describe("ReviewForm", () => {
 
     expect(markup).toContain("A-2 · Enviar el informe final.");
     expect(markup).toContain("Expresión original: el próximo viernes");
+    expect(markup).toContain('class="relative-date-field"');
     expect(markup).toContain('aria-label="Fecha resuelta para A-2"');
     expect(markup).toContain('type="date"');
   });

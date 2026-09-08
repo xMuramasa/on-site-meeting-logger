@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 REQUIRED_IGNORE_PATTERNS = {
+    ".hermes-qa-*",
     "meeting-artifacts/",
     "recordings/",
     "*.m4a",
@@ -52,6 +53,7 @@ def _is_meeting_artifact(path: str) -> bool:
     artifact_path = Path(path)
     return (
         path.startswith(ARTIFACT_DIRECTORIES)
+        or artifact_path.name.startswith(".hermes-qa-")
         or artifact_path.suffix.lower() in RECORDING_SUFFIXES
         or artifact_path.name in GENERATED_ARTIFACT_FILENAMES
         or any(MEETING_DIRECTORY.fullmatch(part) for part in artifact_path.parts[:-1])

@@ -10,6 +10,8 @@ htmlcov/
 build/
 dist/
 acceptance-output/
+.worktrees/
+.hermes-qa-*
 # Meeting recordings, transcripts, reviews, and generated actas are local-only.
 meeting-artifacts/
 recordings/

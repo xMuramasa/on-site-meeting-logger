@@ -17,7 +17,7 @@ def _run(root: Path) -> subprocess.CompletedProcess[str]:
 def _init_repo(root: Path) -> None:
     subprocess.run(["git", "init", "--quiet", str(root)], check=True)
     (root / ".gitignore").write_text(
-        "meeting-artifacts/\nrecordings/\n*.m4a\n*.mp3\n*.mp4\n*.wav\n*.webm\n*.ogg\n",
+        ".hermes-qa-*\nmeeting-artifacts/\nrecordings/\n*.m4a\n*.mp3\n*.mp4\n*.wav\n*.webm\n*.ogg\n",
         encoding="utf-8",
     )
     (root / "README.md").write_text("# Fixture\n", encoding="utf-8")
@@ -61,6 +61,18 @@ def test_hygiene_check_rejects_staged_recordings_and_transcripts(tmp_path: Path)
     assert result.returncode == 1
     assert "tracked meeting artifact: meeting.mp4" in result.stderr
     assert "tracked meeting artifact: transcript.md" in result.stderr
+
+
+def test_hygiene_check_rejects_tracked_hermes_qa_transcripts(tmp_path: Path):
+    _init_repo(tmp_path)
+    transcript = tmp_path / ".hermes-qa-transcript-2026-09-07.txt"
+    transcript.write_text("private meeting transcript\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-f", transcript.name], check=True)
+
+    result = _run(tmp_path)
+
+    assert result.returncode == 1
+    assert f"tracked meeting artifact: {transcript.name}" in result.stderr
 
 
 def test_hygiene_check_rejects_staged_dated_meeting_output(tmp_path: Path):
