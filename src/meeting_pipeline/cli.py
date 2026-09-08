@@ -31,7 +31,11 @@ OutRootOpt = typer.Option(
 )
 MeetingDirOpt = typer.Option(..., "--meeting-dir", help="Existing dated meeting directory.")
 ConfigOpt = typer.Option(None, "--config", "-c", help="Pipeline config YAML.")
-ForceOpt = typer.Option(False, "--force", help="Replace existing approved artifacts.")
+ForceOpt = typer.Option(
+    False,
+    "--force",
+    help="Deprecated compatibility option; changed approved reviews regenerate derived artifacts.",
+)
 
 
 def _fail(exc: Exception) -> None:

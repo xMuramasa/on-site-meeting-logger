@@ -11,7 +11,7 @@ from typing import Any
 from .audio import probe_audio
 from .chunking import chunk_transcript
 from .config import load_config
-from .errors import PipelineError, RenderError
+from .errors import PipelineError
 from .manifest import (
     complete_stage,
     fail_stage,
@@ -255,13 +255,7 @@ def run_stages(
             for name in ("acta.md.j2", "acta.html.j2", "digest.md.j2")
         ],
     )
-    expected_final = [
-        meeting_dir / f"{approved.meeting.slug()}.md",
-        meeting_dir / f"{approved.meeting.slug()}.html",
-    ]
     if not stage_is_current(manifest, stage, render_fp):
-        if not force and any(path.exists() for path in expected_final):
-            raise RenderError("final acta files already exist; pass --force to replace them")
         rendered = render_documents(approved, meeting_dir)
         commit(stage, render_fp, rendered)
     if until == stage:
@@ -273,8 +267,6 @@ def run_stages(
     pdf_path = meeting_dir / f"{approved.meeting.slug()}.pdf"
     pdf_fp = fingerprint("pdf-v1", sha256_file(html_path), settings.pdf.model_dump(mode="json"))
     if not stage_is_current(manifest, stage, pdf_fp):
-        if pdf_path.exists() and not force:
-            raise RenderError("final PDF already exists; pass --force to replace it")
         pdf_exporter(html_path, pdf_path, settings.pdf)
         commit(stage, pdf_fp, {"pdf": pdf_path})
     if until == stage:

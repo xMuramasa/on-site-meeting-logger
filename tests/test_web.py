@@ -125,7 +125,13 @@ def test_review_round_trip_and_finalize(tmp_path):
     api.put("/api/meetings/2026-09-03/review", headers=headers, json=review)
     accepted = api.post("/api/meetings/2026-09-03/finalize", headers=headers)
     assert accepted.status_code == 202
-    assert calls == [(meeting, "validate")]
+    review["proper_nouns"] = {"Obvio": "Obvio Health"}
+    saved_edit = api.put("/api/meetings/2026-09-03/review", headers=headers, json=review)
+    second_finalize = api.post("/api/meetings/2026-09-03/finalize", headers=headers)
+
+    assert saved_edit.status_code == 200
+    assert second_finalize.status_code == 202
+    assert calls == [(meeting, "validate"), (meeting, "validate")]
 
 
 def test_meeting_api_exposes_relative_date_review_context(tmp_path):
