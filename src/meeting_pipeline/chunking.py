@@ -13,7 +13,7 @@ def chunk_transcript(
 ) -> list[dict]:
     if target_tokens <= 0 or chars_per_token <= 0:
         raise ValueError("chunk budget must be positive")
-    segments = transcript.segments
+    segments = transcript.usable_segments()
     if not segments:
         return []
     max_chars = max(1, int(target_tokens * chars_per_token))

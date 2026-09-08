@@ -19,6 +19,15 @@ class FakeModel:
         return iter(segments), info
 
 
+class RepeatingModel:
+    def transcribe(self, path, **kwargs):
+        segments = [
+            SimpleNamespace(id=0, start=0.0, end=2.0, text="Revisaremos el presupuesto mañana"),
+            SimpleNamespace(id=1, start=2.0, end=4.0, text="Revisaremos el presupuesto mañana"),
+        ]
+        return iter(segments), SimpleNamespace(language="es", language_probability=0.98)
+
+
 def metadata(path):
     return AudioMetadata(
         path=str(path),
@@ -47,3 +56,13 @@ def test_transcribe_with_injected_model_and_write_outputs(tmp_path):
     text = md_path.read_text(encoding="utf-8")
     assert "[00:00:00–00:00:02] Hola" in text
     assert "Speaker identification unavailable" in text
+
+
+def test_transcribe_marks_repeated_text_as_degraded(tmp_path):
+    audio = tmp_path / "meeting.m4a"
+    audio.write_bytes(b"fake")
+
+    transcript = transcribe_audio(audio, metadata(audio), load_config(None).transcription, RepeatingModel())
+
+    assert [warning.kind for warning in transcript.quality_warnings] == ["repeated_segment"]
+    assert [(item.start, item.end) for item in transcript.degraded_ranges] == [(0.0, 4.0)]

@@ -9,6 +9,7 @@ from .config import TranscriptionSettings
 from .errors import TranscriptionError
 from .manifest import write_json_atomic
 from .models import AudioMetadata, EvidenceRange, Transcript, TranscriptSegment, format_timestamp
+from .transcript_quality import detect_degraded_ranges
 
 
 def _load_model(settings: TranscriptionSettings) -> Any:
@@ -68,6 +69,7 @@ def transcribe_audio(
         if (s.no_speech_prob is not None and s.no_speech_prob >= 0.8)
         or (s.avg_logprob is not None and s.avg_logprob <= -1.0)
     ]
+    quality_warnings, degraded_ranges = detect_degraded_ranges(segments, duration)
     return Transcript(
         source=metadata.filename,
         language=str(getattr(info, "language", settings.language or "unknown")),
@@ -76,6 +78,8 @@ def transcribe_audio(
         coverage_ratio=min(1.0, final_end / duration) if duration else 0.0,
         segments=segments,
         low_confidence_ranges=low,
+        quality_warnings=quality_warnings,
+        degraded_ranges=degraded_ranges,
         model=settings.model,
     )
 
@@ -95,6 +99,12 @@ def write_transcript_files(meeting_dir: Path, transcript: Transcript) -> tuple[P
         "- Speaker identification unavailable; do not infer identities from sequence.",
         "",
     ]
+    if transcript.quality_warnings:
+        lines += ["## Transcript quality warnings", ""]
+        for warning in transcript.quality_warnings:
+            labels = "; ".join(item.label() for item in warning.evidence)
+            lines.append(f"- {warning.note} {labels}")
+        lines.append("")
     for segment in transcript.segments:
         lines.append(
             f"[{format_timestamp(segment.start)}–{format_timestamp(segment.end)}] {segment.text}"

@@ -85,6 +85,18 @@ class TranscriptSegment(Strict):
         return self
 
 
+class TranscriptQualityWarning(Strict):
+    kind: Literal[
+        "repeated_segment",
+        "repeated_ngram",
+        "tail_loop",
+        "coverage_gap",
+        "low_lexical_diversity",
+    ]
+    note: str = Field(min_length=1)
+    evidence: list[EvidenceRange] = Field(min_length=1)
+
+
 class Transcript(Strict):
     source: str
     language: str
@@ -93,6 +105,8 @@ class Transcript(Strict):
     coverage_ratio: float = 0.0
     segments: list[TranscriptSegment]
     low_confidence_ranges: list[EvidenceRange] = Field(default_factory=list)
+    quality_warnings: list[TranscriptQualityWarning] = Field(default_factory=list)
+    degraded_ranges: list[EvidenceRange] = Field(default_factory=list)
     model: str | None = None
 
     @model_validator(mode="after")
@@ -110,8 +124,21 @@ class Transcript(Strict):
             previous = segment.start
         return self
 
-    def text(self) -> str:
-        return " ".join(s.text.strip() for s in self.segments)
+    def usable_segments(self, include_degraded: bool = False) -> list[TranscriptSegment]:
+        if include_degraded:
+            return list(self.segments)
+        return [
+            segment
+            for segment in self.segments
+            if not any(
+                segment.id in warning.segment_ids
+                or (segment.start < warning.end and segment.end > warning.start)
+                for warning in self.degraded_ranges
+            )
+        ]
+
+    def text(self, include_degraded: bool = False) -> str:
+        return " ".join(s.text.strip() for s in self.usable_segments(include_degraded))
 
 
 class AudioMetadata(Strict):

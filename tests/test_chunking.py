@@ -34,6 +34,17 @@ def test_long_transcript_chunks_preserve_order_and_overlap():
     assert chunks[-1]["end"] <= 80.0
 
 
+def test_chunking_excludes_degraded_text_by_default():
+    transcript = make_transcript(3)
+    transcript.degraded_ranges = [EvidenceRange(start=10, end=18, segment_ids=[1])]
+
+    chunks = chunk_transcript(
+        transcript, target_tokens=1000, chars_per_token=4, overlap_seconds=0
+    )
+
+    assert chunks[0]["segment_ids"] == [0, 2]
+
+
 def test_merge_evidence_removes_overlapping_duplicates():
     merged = merge_evidence_ranges(
         [
