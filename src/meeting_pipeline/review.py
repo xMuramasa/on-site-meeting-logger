@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -46,17 +47,50 @@ def load_review(path: Path) -> ReviewState:
         raise ReviewError(f"invalid review file {path}: {exc}") from exc
 
 
-def _replace_strings(value: Any, replacements: dict[str, str]) -> Any:
-    if isinstance(value, str):
-        for old, new in replacements.items():
-            if old and new and old != new:
-                value = value.replace(old, new)
+def _correct_text(value: str | None, replacements: dict[str, str]) -> str | None:
+    valid = {old: new for old, new in replacements.items() if old and new and old != new}
+    if value is None or not valid:
         return value
-    if isinstance(value, list):
-        return [_replace_strings(item, replacements) for item in value]
-    if isinstance(value, dict):
-        return {key: _replace_strings(item, replacements) for key, item in value.items()}
-    return value
+    alternatives = "|".join(re.escape(old) for old in sorted(valid, key=len, reverse=True))
+    pattern = re.compile(rf"(?<!\w)({alternatives})(?!\w)")
+    return pattern.sub(lambda match: valid[match.group(1)], value)
+
+
+def _correct_fields(
+    record: dict[str, Any], fields: tuple[str, ...], replacements: dict[str, str]
+) -> None:
+    for field in fields:
+        record[field] = _correct_text(record[field], replacements)
+
+
+def _correct_proper_nouns(data: dict[str, Any], replacements: dict[str, str]) -> None:
+    _correct_fields(data["meeting"], ("title", "location"), replacements)
+    _correct_fields(data, ("participants_note", "continuity_note", "sources_note"), replacements)
+
+    for participant in data["participants"]:
+        _correct_fields(participant, ("name",), replacements)
+    for section in data["sections"]:
+        _correct_fields(section, ("title",), replacements)
+        for paragraph in section["paragraphs"]:
+            _correct_fields(paragraph, ("text",), replacements)
+        for action in section["actions"]:
+            _correct_fields(
+                action,
+                ("outcome", "owner", "due_expression", "acceptance", "prior_context"),
+                replacements,
+            )
+    for decision in data["decisions"]:
+        _correct_fields(decision, ("statement", "section", "prior_context"), replacements)
+    for proposal in data["proposals"]:
+        _correct_fields(proposal, ("statement", "section", "prior_context"), replacements)
+    for risk in data["risks"]:
+        _correct_fields(risk, ("statement", "section"), replacements)
+    for question in data["open_questions"]:
+        _correct_fields(question, ("question", "section"), replacements)
+    for follow_up in data["prior_follow_ups"]:
+        _correct_fields(follow_up, ("item", "detail"), replacements)
+    for warning in data["quality_warnings"]:
+        _correct_fields(warning, ("note",), replacements)
 
 
 def apply_review(draft: CanonicalActa, review: ReviewState) -> CanonicalActa:
@@ -67,7 +101,7 @@ def apply_review(draft: CanonicalActa, review: ReviewState) -> CanonicalActa:
     if unknown:
         raise ReviewError(f"review references unknown action ids: {sorted(unknown)}")
 
-    data = _replace_strings(draft.model_dump(mode="json"), review.proper_nouns)
+    data = draft.model_dump(mode="json")
     review_people = {person.name: person for person in review.participants}
     kept: list[dict[str, Any]] = []
     for participant in data["participants"]:
@@ -93,4 +127,5 @@ def apply_review(draft: CanonicalActa, review: ReviewState) -> CanonicalActa:
                 action["due_date"] = due_date.isoformat()
                 action["due_status"] = "explicit"
                 action["due_expression"] = None
+    _correct_proper_nouns(data, review.proper_nouns)
     return CanonicalActa.model_validate(data)

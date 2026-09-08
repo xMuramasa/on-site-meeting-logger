@@ -4,7 +4,7 @@ import pytest
 import yaml
 
 from meeting_pipeline.errors import ReviewError
-from meeting_pipeline.models import CanonicalActa
+from meeting_pipeline.models import CanonicalActa, ReviewState
 from meeting_pipeline.review import apply_review, generate_review, load_review
 
 FIXTURE = Path(__file__).parent / "fixtures" / "valid-acta.json"
@@ -59,3 +59,42 @@ def test_review_rejects_unknown_action_id(tmp_path):
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     with pytest.raises(ReviewError, match="unknown action"):
         apply_review(draft(), load_review(path))
+
+
+def test_apply_review_corrects_only_complete_tokens_in_content_fields():
+    data = draft().model_dump(mode="json")
+    data["meeting"]["title"] = "Reunión Mispelled"
+    data["meeting"]["location"] = "Sala Mispelled"
+    data["meeting"]["date"] = "2026-08-31"
+    data["meeting"]["recording_filename"] = "Mispelled-recording.m4a"
+    data["meeting"]["recording_sha256"] = "dead" * 16
+    data["sections"][0]["paragraphs"][0]["text"] = "Mispelled y MispelledProduct"
+    data["sections"][0]["actions"][2]["dependencies"] = ["A-1"]
+    data["proposals"][0]["status"] = "open"
+    source = CanonicalActa.model_validate(data)
+
+    approved = apply_review(
+        source,
+        ReviewState(
+            proper_nouns={
+                "Mispelled": "Corrected",
+                "2026-08-31": "2026-09-01",
+                "recording": "audio",
+                "dead": "beef",
+                "A-1": "A-9",
+                "open": "superseded",
+            },
+            approve_for_final_render=True,
+        ),
+    )
+
+    assert approved.meeting.title == "Reunión Corrected"
+    assert approved.meeting.location == "Sala Corrected"
+    assert approved.sections[0].paragraphs[0].text == "Corrected y MispelledProduct"
+    assert approved.meeting.date == source.meeting.date
+    assert approved.meeting.recording_filename == source.meeting.recording_filename
+    assert approved.meeting.recording_sha256 == source.meeting.recording_sha256
+    action = approved.action_by_id("A-3")
+    assert action is not None
+    assert action.dependencies == ["A-1"]
+    assert approved.proposals[0].status == "open"
