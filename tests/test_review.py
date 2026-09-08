@@ -22,6 +22,13 @@ def test_generate_review_collects_unresolved_fields(tmp_path):
     assert any(p["name"] == "Martín" for p in data["participants"])
     unresolved = [a.id for a in draft().actions() if a.owner_status == "unresolved"]
     assert set(unresolved) <= set(data["owners"])
+    relative_actions = [action for action in draft().actions() if action.due_status == "relative"]
+    assert [item["action_id"] for item in data["relative_date_actions"]] == [
+        action.id for action in relative_actions
+    ]
+    assert [(item["action_text"], item["due_expression"], item["resolved_date"]) for item in data["relative_date_actions"]] == [
+        (action.outcome, action.due_expression, None) for action in relative_actions
+    ]
 
 
 def test_apply_review_requires_explicit_approval(tmp_path):
@@ -41,7 +48,9 @@ def test_apply_review_confirms_participant_owner_and_relative_date(tmp_path):
     data["owners"][unresolved.id] = "Ana"
     relative = next((a for a in draft().actions() if a.due_status == "relative"), None)
     if relative:
-        data["relative_dates"][relative.id] = "2026-09-04"
+        next(item for item in data["relative_date_actions"] if item["action_id"] == relative.id)[
+            "resolved_date"
+        ] = "2026-09-04"
     path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
     approved = apply_review(draft(), load_review(path))
     assert approved.participants[0].attendance == "confirmed"

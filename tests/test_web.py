@@ -3,8 +3,11 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from meeting_pipeline.models import PipelineManifest
+from meeting_pipeline.models import CanonicalActa, PipelineManifest
+from meeting_pipeline.review import generate_review
 from meeting_pipeline.web import create_app
+
+FIXTURE = Path(__file__).parent / "fixtures" / "valid-acta.json"
 
 
 def client(
@@ -103,7 +106,7 @@ def test_review_round_trip_and_finalize(tmp_path):
         "participants": [],
         "proper_nouns": {},
         "owners": {},
-        "relative_dates": {},
+        "relative_date_actions": [],
         "quality_warnings": [],
         "approve_for_final_render": False,
     }
@@ -123,3 +126,25 @@ def test_review_round_trip_and_finalize(tmp_path):
     accepted = api.post("/api/meetings/2026-09-03/finalize", headers=headers)
     assert accepted.status_code == 202
     assert calls == [(meeting, "validate")]
+
+
+def test_meeting_api_exposes_relative_date_review_context(tmp_path):
+    meeting = tmp_path / "meetings" / "2026-09-03"
+    generate_review(CanonicalActa.model_validate_json(FIXTURE.read_text()), meeting / "review.yaml")
+
+    detail = client(tmp_path).get("/api/meetings/2026-09-03").json()
+
+    assert detail["review"]["relative_date_actions"] == [
+        {
+            "action_id": "A-2",
+            "action_text": "Realizar el segundo contacto con la Universidad de los Andes y coordinar con ANID.",
+            "due_expression": "esta semana",
+            "resolved_date": None,
+        },
+        {
+            "action_id": "A-6",
+            "action_text": "Presentar y revisar las pantallas de alta fidelidad.",
+            "due_expression": "esta semana",
+            "resolved_date": None,
+        },
+    ]

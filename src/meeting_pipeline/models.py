@@ -392,11 +392,18 @@ class ReviewParticipant(Strict):
     attended: bool | None = None
 
 
+class RelativeDateReview(Strict):
+    action_id: str = Field(pattern=r"^A-[0-9]+$")
+    action_text: str = Field(min_length=1)
+    due_expression: str = Field(min_length=1)
+    resolved_date: Date | None = None
+
+
 class ReviewState(Strict):
     participants: list[ReviewParticipant] = Field(default_factory=list)
     proper_nouns: dict[str, str] = Field(default_factory=dict)
     owners: dict[str, str] = Field(default_factory=dict)
-    relative_dates: dict[str, Date] = Field(default_factory=dict)
+    relative_date_actions: list[RelativeDateReview] = Field(default_factory=list)
     quality_warnings: list[str] = Field(default_factory=list)
     approve_for_final_render: bool = False
 

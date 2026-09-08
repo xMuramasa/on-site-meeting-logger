@@ -10,7 +10,7 @@ import yaml
 from pydantic import ValidationError
 
 from .errors import ReviewError
-from .models import CanonicalActa, ReviewParticipant, ReviewState
+from .models import CanonicalActa, RelativeDateReview, ReviewParticipant, ReviewState
 
 
 def generate_review(draft: CanonicalActa, path: Path) -> ReviewState:
@@ -23,7 +23,15 @@ def generate_review(draft: CanonicalActa, path: Path) -> ReviewState:
             for action in draft.actions()
             if action.owner_status == "unresolved"
         },
-        relative_dates={},
+        relative_date_actions=[
+            RelativeDateReview(
+                action_id=action.id,
+                action_text=action.outcome,
+                due_expression=action.due_expression or "",
+            )
+            for action in draft.actions()
+            if action.due_status == "relative"
+        ],
         quality_warnings=[warning.note for warning in draft.quality_warnings],
         approve_for_final_render=False,
     )
@@ -97,7 +105,8 @@ def apply_review(draft: CanonicalActa, review: ReviewState) -> CanonicalActa:
     if not review.approve_for_final_render:
         raise ReviewError("review must set approve_for_final_render: true")
     known = {action.id for action in draft.actions()}
-    unknown = (set(review.owners) | set(review.relative_dates)) - known
+    relative_action_ids = {item.action_id for item in review.relative_date_actions}
+    unknown = (set(review.owners) | relative_action_ids) - known
     if unknown:
         raise ReviewError(f"review references unknown action ids: {sorted(unknown)}")
 
@@ -122,9 +131,16 @@ def apply_review(draft: CanonicalActa, review: ReviewState) -> CanonicalActa:
             if owner and owner.strip().casefold() not in {"unresolved", "por confirmar"}:
                 action["owner"] = owner.strip()
                 action["owner_status"] = "explicit"
-            due_date = review.relative_dates.get(action["id"])
-            if due_date is not None:
-                action["due_date"] = due_date.isoformat()
+            relative_date = next(
+                (
+                    item.resolved_date
+                    for item in review.relative_date_actions
+                    if item.action_id == action["id"]
+                ),
+                None,
+            )
+            if relative_date is not None:
+                action["due_date"] = relative_date.isoformat()
                 action["due_status"] = "explicit"
                 action["due_expression"] = None
     _correct_proper_nouns(data, review.proper_nouns)

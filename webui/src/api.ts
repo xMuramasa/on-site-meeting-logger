@@ -1,9 +1,15 @@
 export type ReviewParticipant = { name: string; email: string | null; attended: boolean | null };
+export type RelativeDateReview = {
+  action_id: string;
+  action_text: string;
+  due_expression: string;
+  resolved_date: string | null;
+};
 export type Review = {
   participants: ReviewParticipant[];
   proper_nouns: Record<string, string>;
   owners: Record<string, string>;
-  relative_dates: Record<string, string>;
+  relative_date_actions: RelativeDateReview[];
   quality_warnings: string[];
   approve_for_final_render: boolean;
 };

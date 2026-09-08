@@ -9,6 +9,7 @@ from meeting_pipeline.models import (
     CanonicalActa,
     EvidenceRange,
     Participant,
+    RelativeDateReview,
     TranscriptSegment,
     format_timestamp,
     spanish_long_date,
@@ -139,6 +140,23 @@ def test_relative_due_status_needs_a_relative_expression():
     assert ActionItem(**base, due_expression="esta semana").due_expression == "esta semana"
     with pytest.raises(ValidationError):
         ActionItem(**base)
+
+
+def test_relative_date_review_preserves_context_and_allows_an_optional_resolution():
+    unresolved = RelativeDateReview(
+        action_id="A-1",
+        action_text="Enviar el informe final.",
+        due_expression="el próximo viernes",
+    )
+    resolved = RelativeDateReview(
+        action_id="A-2",
+        action_text="Revisar las pantallas.",
+        due_expression="esta semana",
+        resolved_date="2026-09-04",
+    )
+
+    assert unresolved.resolved_date is None
+    assert resolved.resolved_date.isoformat() == "2026-09-04"
 
 
 def test_continuity_based_owner_must_carry_prior_context():
