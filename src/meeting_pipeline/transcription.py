@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import TranscriptionSettings
-from .errors import TranscriptionError
+from .errors import AudioDecodeError, ModelUnavailableError, NoSpeechError, TranscriptionError
 from .manifest import write_json_atomic
 from .models import AudioMetadata, EvidenceRange, Transcript, TranscriptSegment, format_timestamp
 from .transcript_quality import detect_degraded_ranges
@@ -16,7 +16,7 @@ def _load_model(settings: TranscriptionSettings) -> Any:
     try:
         from faster_whisper import WhisperModel
     except ImportError as exc:
-        raise TranscriptionError(
+        raise ModelUnavailableError(
             "faster-whisper is not installed; run `uv sync --extra stt`"
         ) from exc
     try:
@@ -24,7 +24,7 @@ def _load_model(settings: TranscriptionSettings) -> Any:
             settings.model, device=settings.device, compute_type=settings.compute_type
         )
     except Exception as exc:
-        raise TranscriptionError(
+        raise ModelUnavailableError(
             f"could not load faster-whisper model {settings.model!r}: {exc}"
         ) from exc
 
@@ -58,9 +58,9 @@ def transcribe_audio(
     except Exception as exc:
         if isinstance(exc, TranscriptionError):
             raise
-        raise TranscriptionError(f"transcription failed: {exc}") from exc
+        raise AudioDecodeError("audio decoding failed") from exc
     if not segments:
-        raise TranscriptionError("transcription produced no speech segments")
+        raise NoSpeechError("transcription produced no speech segments")
     final_end = max(s.end for s in segments)
     duration = metadata.duration_seconds
     low = [

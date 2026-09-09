@@ -21,6 +21,18 @@ class TranscriptionError(PipelineError):
     """Transcription backend unavailable or produced an unusable transcript."""
 
 
+class ModelUnavailableError(TranscriptionError):
+    """The local transcription model cannot be imported or initialized."""
+
+
+class AudioDecodeError(TranscriptionError):
+    """The transcription backend could not decode the supplied audio."""
+
+
+class NoSpeechError(TranscriptionError):
+    """The supplied audio contains no usable speech segments."""
+
+
 class ProviderError(PipelineError):
     """Reasoning endpoint unreachable, erroring, or returning unusable output."""
 

@@ -38,6 +38,15 @@ const STAGE_LABELS: Record<string, string> = {
   validate: "Validado",
 };
 
+const RECOVERY: Record<api.FailureCode, string> = {
+  NO_SPEECH: "No se detectó voz. Graba o sube un audio con voz audible; no reintentes el mismo archivo.",
+  MODEL_UNAVAILABLE: "El modelo local no está disponible. Revisa su instalación antes de reanudar.",
+  AUDIO_DECODE_FAILED: "Convierte o vuelve a exportar el audio en un formato compatible antes de crear una nueva reunión.",
+  STORAGE_UNAVAILABLE: "No se pudo guardar el trabajo local. Revisa el espacio libre y los permisos antes de reanudar.",
+  JOB_INTERRUPTED: "La aplicación se interrumpió. Puedes reanudar desde la última etapa completada.",
+  PROCESSING_FAILED: "No se pudo completar esta etapa. Revisa la configuración local e inténtalo de nuevo.",
+};
+
 function today() {
   const now = new Date();
   return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
@@ -45,6 +54,12 @@ function today() {
 
 function StatusDot({ state }: { state?: string }) {
   return <span className={`status-dot ${state === "complete" ? "done" : state === "failed" ? "failed" : ""}`} />;
+}
+
+export function ProcessingFailure({ job, busy, restart }: { job: api.Job; busy: boolean; restart: () => void }) {
+  const code = job.error_code || "PROCESSING_FAILED";
+  const stage = STAGE_LABELS[job.stage] || job.stage;
+  return <div className="error-banner"><AlertCircle size={18} /><div><strong>El procesamiento se detuvo en: {stage}</strong><span><code>{code}</code> · {RECOVERY[code]}</span></div>{job.retryable !== false && <button className="secondary-button" disabled={busy} onClick={restart}><RotateCcw size={16} /> Reanudar</button>}</div>;
 }
 
 function App() {
@@ -195,9 +210,9 @@ function App() {
             <div className="meeting-detail">
               <div className="detail-head"><div><span className="eyebrow accent">REUNIÓN · {selected}</span><h1>Revisión del acta</h1><p>Confirma solamente lo que una persona pueda respaldar.</p></div><div className={`job-badge ${detail?.job?.status || "idle"}`}>{detail?.job?.status === "running" && <LoaderCircle className="spin" size={15} />}{detail?.job?.status === "failed" ? "Error" : detail?.job?.status === "running" ? "Procesando" : current?.stages.validate === "complete" ? "Validada" : "Lista"}</div></div>
 
-              {detail?.job?.status === "failed" && <div className="error-banner"><AlertCircle size={18} /><div><strong>El procesamiento se detuvo</strong><span>{detail.job.error}</span></div><button className="secondary-button" disabled={busy} onClick={() => controlProcessing("restart")}><RotateCcw size={16} /> Reanudar</button></div>}
+              {detail?.job?.status === "failed" && <ProcessingFailure job={detail.job} busy={busy} restart={() => controlProcessing("restart")} />}
               {detail?.job?.status === "running" && <button className="secondary-button" disabled={busy} onClick={() => controlProcessing("cancel")}><CircleStop size={16} /> Cancelar</button>}
-              {detail?.job?.status === "cancelled" && <div className="error-banner"><CircleStop size={18} /><div><strong>Procesamiento cancelado</strong><span>{detail.job.error || "Puedes reanudar desde la última etapa completada."}</span></div><button className="secondary-button" disabled={busy} onClick={() => controlProcessing("restart")}><RotateCcw size={16} /> Reanudar</button></div>}
+              {detail?.job?.status === "cancelled" && <div className="error-banner"><CircleStop size={18} /><div><strong>Procesamiento cancelado</strong><span>Puedes reanudar desde la última etapa completada.</span></div><button className="secondary-button" disabled={busy} onClick={() => controlProcessing("restart")}><RotateCcw size={16} /> Reanudar</button></div>}
               <section className="progress-card">
                 {Object.entries(STAGE_LABELS).map(([key, label]) => <div className="stage" key={key}><StatusDot state={current?.stages[key]} /><span>{label}</span></div>)}
               </section>

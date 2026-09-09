@@ -17,7 +17,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .errors import PipelineError
 from .ingest import SUPPORTED_AUDIO, ingest_meeting
-from .manifest import fail_stage, load_manifest, write_manifest, write_text_atomic
+from .manifest import fail_stage, load_manifest, meeting_lock, write_manifest, write_text_atomic
 from .models import ReviewState
 from .pipeline import clear_cancellation, request_cancellation, run_stages
 from .readiness import ReadinessCheck, ReadinessReport, check_readiness
@@ -37,7 +37,7 @@ Runner = Callable[..., Any]
 Readiness = Callable[[], ReadinessReport]
 
 
-def _durable_job(manifest: Any) -> dict[str, str] | None:
+def _durable_job(manifest: Any) -> dict[str, Any] | None:
     """Project API job status from the durable per-stage manifest, never process memory."""
     states = list(manifest.stages.items())
     for name, state in reversed(states):
@@ -46,8 +46,9 @@ def _durable_job(manifest: Any) -> dict[str, str] | None:
     for name, state in reversed(states):
         if state.status in {"failed", "cancelled"}:
             result = {"status": state.status, "stage": name}
-            if state.note:
-                result["error"] = state.note
+            if state.status == "failed":
+                result["error_code"] = state.error_code or "PROCESSING_FAILED"
+                result["retryable"] = state.retryable if state.retryable is not None else True
             return result
     for name, state in reversed(states):
         if state.status == "complete":
@@ -55,7 +56,28 @@ def _durable_job(manifest: Any) -> dict[str, str] | None:
     return None
 
 
-def _job_for_meeting(path: Path) -> dict[str, str] | None:
+def _mark_interrupted_jobs(root: Path) -> None:
+    """Recover abandoned stages without modifying another process's live job."""
+    for manifest_path in root.glob("????-??-??/manifest.json"):
+        try:
+            with meeting_lock(manifest_path.parent):
+                manifest = load_manifest(manifest_path)
+                for name, state in manifest.stages.items():
+                    if state.status == "running":
+                        fail_stage(
+                            manifest,
+                            name,
+                            "JOB_INTERRUPTED",
+                            error_code="JOB_INTERRUPTED",
+                            retryable=True,
+                        )
+                        write_manifest(manifest_path, manifest)
+                        break
+        except PipelineError:
+            continue
+
+
+def _job_for_meeting(path: Path) -> dict[str, Any] | None:
     try:
         return _durable_job(load_manifest(path / "manifest.json"))
     except PipelineError:
@@ -111,6 +133,7 @@ def create_app(
     """Create an app that can only mutate local pipeline state."""
     root = Path(output_root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    _mark_interrupted_jobs(root)
     incoming = root / ".incoming"
     incoming.mkdir(mode=0o700, exist_ok=True)
     if readiness is None:
@@ -171,7 +194,13 @@ def create_app(
             if manifest_path.is_file():
                 manifest = load_manifest(manifest_path)
                 if not any(state.status == "failed" for state in manifest.stages.values()):
-                    fail_stage(manifest, until, "PipelineError: processing failed")
+                    fail_stage(
+                        manifest,
+                        until,
+                        "PROCESSING_FAILED",
+                        error_code="PROCESSING_FAILED",
+                        retryable=True,
+                    )
                     write_manifest(manifest_path, manifest)
 
     def meeting_path(value: str) -> Path:
@@ -296,8 +325,15 @@ def create_app(
     @app.post("/api/meetings/{meeting_date}/restart", status_code=202)
     def restart(meeting_date: str, background: BackgroundTasks) -> dict[str, str]:
         path = meeting_path(meeting_date)
-        clear_cancellation(path)
         manifest = load_manifest(path / "manifest.json")
+        if any(
+            state.status == "failed" and state.error_code == "NO_SPEECH"
+            for state in manifest.stages.values()
+        ):
+            raise HTTPException(
+                status_code=409, detail="upload audio with audible speech before retrying"
+            )
+        clear_cancellation(path)
         finalization_started = any(
             name in {"approve", "render", "export_pdf", "validate"}
             for name in manifest.stages

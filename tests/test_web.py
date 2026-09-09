@@ -197,7 +197,13 @@ def test_meeting_api_derives_failed_job_from_durable_stage_state(tmp_path):
         }
     )
     start_stage(manifest, "transcribe")
-    fail_stage(manifest, "transcribe", "RuntimeError: processing failed")
+    fail_stage(
+        manifest,
+        "transcribe",
+        "AUDIO_DECODE_FAILED",
+        error_code="AUDIO_DECODE_FAILED",
+        retryable=False,
+    )
     write_manifest(meeting / "manifest.json", manifest)
 
     detail = client(tmp_path).get("/api/meetings/2026-09-03").json()
@@ -205,8 +211,71 @@ def test_meeting_api_derives_failed_job_from_durable_stage_state(tmp_path):
     assert detail["job"] == {
         "status": "failed",
         "stage": "transcribe",
-        "error": "RuntimeError: processing failed",
+        "error_code": "AUDIO_DECODE_FAILED",
+        "retryable": False,
     }
+
+
+def test_app_restart_marks_running_job_as_interrupted_with_safe_recovery(tmp_path):
+    meeting = tmp_path / "meetings" / "2026-09-03"
+    source = meeting / "source" / "meeting.webm"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"audio")
+    manifest = PipelineManifest.model_validate(
+        {
+            "pipeline_version": "test",
+            "meeting_dir": str(meeting),
+            "meeting_date": "2026-09-03",
+            "created_at": "2026-09-03T00:00:00Z",
+            "updated_at": "2026-09-03T00:00:00Z",
+            "source_filename": "meeting.webm",
+            "source_sha256": "a" * 64,
+        }
+    )
+    start_stage(manifest, "consolidate")
+    write_manifest(meeting / "manifest.json", manifest)
+
+    detail = client(tmp_path).get("/api/meetings/2026-09-03").json()
+
+    assert detail["job"] == {
+        "status": "failed",
+        "stage": "consolidate",
+        "error_code": "JOB_INTERRUPTED",
+        "retryable": True,
+    }
+
+
+def test_restart_rejects_unchanged_silent_input(tmp_path):
+    meeting = tmp_path / "meetings" / "2026-09-03"
+    source = meeting / "source" / "meeting.webm"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"audio")
+    manifest = PipelineManifest.model_validate(
+        {
+            "pipeline_version": "test",
+            "meeting_dir": str(meeting),
+            "meeting_date": "2026-09-03",
+            "created_at": "2026-09-03T00:00:00Z",
+            "updated_at": "2026-09-03T00:00:00Z",
+            "source_filename": "meeting.webm",
+            "source_sha256": "a" * 64,
+        }
+    )
+    fail_stage(
+        manifest,
+        "transcribe",
+        "NO_SPEECH",
+        error_code="NO_SPEECH",
+        retryable=False,
+    )
+    write_manifest(meeting / "manifest.json", manifest)
+    api = client(tmp_path)
+    headers = {"origin": "http://127.0.0.1:8765", "x-csrf-token": "test-csrf-token"}
+
+    response = api.post("/api/meetings/2026-09-03/restart", headers=headers)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "upload audio with audible speech before retrying"
 
 
 def test_cancel_and_restart_are_durable_and_resume_in_background(tmp_path):

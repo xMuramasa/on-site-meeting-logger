@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ReviewForm } from "./App";
-import type { Review } from "./api";
+import { ProcessingFailure, ReviewForm } from "./App";
+import type { Job, Review } from "./api";
 
 const review: Review = {
   participants: [],
@@ -36,5 +36,24 @@ describe("ReviewForm", () => {
     expect(markup).toContain('class="relative-date-field"');
     expect(markup).toContain('aria-label="Fecha resuelta para A-2"');
     expect(markup).toContain('type="date"');
+  });
+});
+
+describe("ProcessingFailure", () => {
+  it("gives Spanish decode recovery without offering an unchanged retry", () => {
+    const job: Job = {
+      status: "failed",
+      stage: "transcribe",
+      error_code: "AUDIO_DECODE_FAILED",
+      retryable: false,
+    };
+    const markup = renderToStaticMarkup(
+      <ProcessingFailure job={job} busy={false} restart={() => undefined} />,
+    );
+
+    expect(markup).toContain("Transcripción");
+    expect(markup).toContain("AUDIO_DECODE_FAILED");
+    expect(markup).toContain("Convierte o vuelve a exportar el audio");
+    expect(markup).not.toContain("Reanudar");
   });
 });

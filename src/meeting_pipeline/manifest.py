@@ -103,10 +103,19 @@ def complete_stage(
     )
 
 
-def fail_stage(manifest: PipelineManifest, name: str, note: str) -> None:
+def fail_stage(
+    manifest: PipelineManifest,
+    name: str,
+    note: str,
+    *,
+    error_code: str | None = None,
+    retryable: bool | None = None,
+) -> None:
     state = manifest.stage(name)
     state.status = "failed"
     state.note = note
+    state.error_code = error_code
+    state.retryable = retryable
     state.failed_at = datetime.now(UTC)
 
 

@@ -11,7 +11,14 @@ from typing import Any
 from .audio import probe_audio
 from .chunking import chunk_transcript
 from .config import load_config
-from .errors import PipelineCancelled, PipelineError
+from .errors import (
+    AudioDecodeError,
+    AudioError,
+    ModelUnavailableError,
+    NoSpeechError,
+    PipelineCancelled,
+    PipelineError,
+)
 from .manifest import (
     cancel_stage,
     complete_stage,
@@ -54,6 +61,25 @@ class PipelineResult:
     meeting_dir: Path
     completed_stage: str
     artifacts: dict[str, Path] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class FailureDiagnostic:
+    code: str
+    retryable: bool
+
+
+def failure_diagnostic(exc: Exception) -> FailureDiagnostic:
+    """Classify failures without preserving untrusted provider or meeting content."""
+    if isinstance(exc, NoSpeechError):
+        return FailureDiagnostic("NO_SPEECH", False)
+    if isinstance(exc, ModelUnavailableError):
+        return FailureDiagnostic("MODEL_UNAVAILABLE", True)
+    if isinstance(exc, (AudioDecodeError, AudioError)):
+        return FailureDiagnostic("AUDIO_DECODE_FAILED", False)
+    if isinstance(exc, OSError):
+        return FailureDiagnostic("STORAGE_UNAVAILABLE", True)
+    return FailureDiagnostic("PROCESSING_FAILED", True)
 
 
 def _read_model(path: Path, model_type: type[Any]) -> Any:
@@ -122,7 +148,7 @@ def _run_stages(
             write_json_atomic(metadata_path, metadata.model_dump(mode="json"))
             commit(stage, inspect_fp, {"metadata": metadata_path})
         except Exception as exc:
-            fail_stage(manifest, stage, _sanitized_failure(exc))
+            _fail_with_diagnostic(manifest, stage, exc)
             write_manifest(manifest_path, manifest)
             raise
     metadata = _read_model(metadata_path, AudioMetadata)
@@ -317,9 +343,16 @@ def _run_stages(
     return PipelineResult(meeting_dir, stage, _all_artifacts(manifest))
 
 
-def _sanitized_failure(exc: Exception) -> str:
-    """Keep exception text and meeting content out of durable status and API responses."""
-    return f"{type(exc).__name__}: processing failed"
+def _fail_with_diagnostic(manifest: Any, stage: str, exc: Exception) -> None:
+    """Persist only a stable safe code, never exception text or chained payloads."""
+    diagnostic = failure_diagnostic(exc)
+    fail_stage(
+        manifest,
+        stage,
+        diagnostic.code,
+        error_code=diagnostic.code,
+        retryable=diagnostic.retryable,
+    )
 
 
 def request_cancellation(meeting_dir: Path) -> None:
@@ -374,6 +407,6 @@ def run_stages(
                     if isinstance(exc, PipelineCancelled):
                         cancel_stage(manifest, running, "Cancellation requested")
                     else:
-                        fail_stage(manifest, running, _sanitized_failure(exc))
+                        _fail_with_diagnostic(manifest, running, exc)
                     write_manifest(manifest_path, manifest)
             raise

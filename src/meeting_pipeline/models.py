@@ -446,6 +446,8 @@ class StageState(Strict):
     failed_at: datetime | None = None
     artifacts: dict[str, str] = Field(default_factory=dict)
     note: str | None = None
+    error_code: str | None = None
+    retryable: bool | None = None
 
 
 class PipelineManifest(Strict):

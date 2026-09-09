@@ -5,10 +5,11 @@ from types import SimpleNamespace
 
 import yaml
 
+from meeting_pipeline.errors import AudioDecodeError, ModelUnavailableError, NoSpeechError
 from meeting_pipeline.ingest import ingest_meeting
 from meeting_pipeline.manifest import load_manifest
 from meeting_pipeline.models import AudioMetadata, CanonicalActa
-from meeting_pipeline.pipeline import run_stages
+from meeting_pipeline.pipeline import failure_diagnostic, run_stages
 from meeting_pipeline.reasoning import ChunkExtraction
 
 FIXTURE = Path(__file__).parent / "fixtures" / "valid-acta.json"
@@ -216,4 +217,46 @@ def test_pipeline_persists_sanitized_failure_for_every_stage(tmp_path):
     assert stage.status == "failed"
     assert stage.started_at is not None
     assert stage.failed_at is not None
-    assert stage.note == "RuntimeError: processing failed"
+    assert stage.note == "PROCESSING_FAILED"
+    assert stage.error_code == "PROCESSING_FAILED"
+    assert stage.retryable is True
+
+
+def test_failure_diagnostics_are_stable_and_safe():
+    assert failure_diagnostic(NoSpeechError("private transcript")).code == "NO_SPEECH"
+    assert failure_diagnostic(NoSpeechError("private transcript")).retryable is False
+    assert failure_diagnostic(ModelUnavailableError("provider payload")).code == "MODEL_UNAVAILABLE"
+    assert failure_diagnostic(AudioDecodeError("decoder payload")).code == "AUDIO_DECODE_FAILED"
+    assert failure_diagnostic(OSError("filesystem path")).code == "STORAGE_UNAVAILABLE"
+
+
+def test_pipeline_persists_safe_decode_diagnostic_for_lazy_whisper_iterator(tmp_path):
+    class LazyBrokenWhisper:
+        def transcribe(self, _path, **_kwargs):
+            def segments():
+                raise RuntimeError("decoder payload contains private meeting text")
+                yield None  # pragma: no cover - makes this a generator
+
+            return segments(), SimpleNamespace(language="es")
+
+    audio = tmp_path / "input.m4a"
+    audio.write_bytes(b"fake audio")
+    meeting_dir = ingest_meeting(audio, None, date(2026, 8, 31), tmp_path / "out")
+
+    try:
+        run_stages(
+            meeting_dir,
+            until="transcribe",
+            transcription_model=LazyBrokenWhisper(),
+            audio_probe=fake_probe,
+        )
+    except Exception:
+        pass
+    else:  # pragma: no cover - assertion is more useful than pytest.raises here
+        raise AssertionError("the lazy decoder failure must propagate")
+
+    stage = load_manifest(meeting_dir / "manifest.json").stages["transcribe"]
+    assert stage.status == "failed"
+    assert stage.error_code == "AUDIO_DECODE_FAILED"
+    assert stage.retryable is False
+    assert "private meeting text" not in stage.note

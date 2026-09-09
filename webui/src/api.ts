@@ -13,7 +13,13 @@ export type Review = {
   quality_warnings: string[];
   approve_for_final_render: boolean;
 };
-export type Job = { status: "running" | "complete" | "failed" | "cancelled"; stage: string; error?: string };
+export type FailureCode = "NO_SPEECH" | "MODEL_UNAVAILABLE" | "AUDIO_DECODE_FAILED" | "STORAGE_UNAVAILABLE" | "JOB_INTERRUPTED" | "PROCESSING_FAILED";
+export type Job = {
+  status: "running" | "complete" | "failed" | "cancelled";
+  stage: string;
+  error_code?: FailureCode;
+  retryable?: boolean;
+};
 export type MeetingSummary = {
   date: string;
   source: string;
