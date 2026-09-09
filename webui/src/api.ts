@@ -38,7 +38,7 @@ export type MeetingDetail = {
   job: Job | null;
   audio_analysis: AudioAnalysis | null;
   review: Review | null;
-  files: string[];
+  artifacts: Artifact[];
 };
 export type ReadinessCheck = { name: string; ok: boolean; detail: string };
 export type Readiness = { ok: boolean; checks: ReadinessCheck[] };
@@ -48,6 +48,13 @@ export type Bootstrap = {
   accepted_audio: string[];
   recording_supported: boolean;
   readiness: Readiness;
+};
+
+export type Artifact = {
+  name: string;
+  role: "minutes" | "transcript" | "digest" | "supporting";
+  format: string;
+  final: boolean;
 };
 
 

@@ -263,7 +263,7 @@ function App() {
 
               {!detail?.review ? <section className="empty-review"><LoaderCircle className={detail?.job?.status === "running" ? "spin" : ""} size={28} /><h2>{detail?.job?.status === "running" ? "Construyendo borrador" : "La revisión aún no está disponible"}</h2><p>Esta vista se actualizará automáticamente.</p></section> : <ReviewForm review={detail.review} update={updateReview} busy={busy} save={() => persistReview(false)} finalize={() => persistReview(true)} />}
 
-              {!!detail?.files.length && <section className="outputs"><div className="section-title"><div><span className="step">03</span><h2>Entregables</h2></div><FileCheck2 size={21} /></div><div className="output-grid">{detail.files.filter((file) => /\.(pdf|html|md)$/.test(file) && !["review.yaml", "transcript.md", "digest.md"].includes(file)).map((file) => <a key={file} href={`/api/meetings/${selected}/files/${encodeURIComponent(file)}`}><span><FileAudio size={18} /><strong>{file.endsWith(".pdf") ? "PDF final" : file.endsWith(".html") ? "Acta HTML" : "Acta Markdown"}</strong></span><Download size={16} /></a>)}</div></section>}
+              {!!detail?.artifacts.length && <Deliverables meetingDate={selected} artifacts={detail.artifacts} />}
             </div>
           )}
           {(notice || error) && <div className={`toast ${error ? "error" : ""}`}>{error ? <AlertCircle size={17} /> : <Check size={17} />}<span>{error || notice}</span><button onClick={() => { setError(""); setNotice(""); }}>×</button></div>}
@@ -271,6 +271,17 @@ function App() {
       </main>
     </div>
   );
+}
+
+const ROLE_LABELS: Record<api.Artifact["role"], string> = {
+  minutes: "Acta",
+  transcript: "Transcripción",
+  digest: "Resumen",
+  supporting: "Archivo de apoyo",
+};
+
+export function Deliverables({ meetingDate, artifacts }: { meetingDate: string; artifacts: api.Artifact[] }) {
+  return <section className="outputs"><div className="section-title"><div><span className="step">03</span><h2>Entregables</h2></div><FileCheck2 size={21} /></div><div className="output-grid">{artifacts.map((artifact) => <a key={artifact.name} href={`/api/meetings/${meetingDate}/files/${encodeURIComponent(artifact.name)}`}><span><FileAudio size={18} /><span><strong>{artifact.final ? "Acta final" : ROLE_LABELS[artifact.role]} · {artifact.format}</strong><small>{artifact.name}</small></span></span><Download size={16} /></a>)}</div></section>;
 }
 
 export function ReviewForm({ review, update, busy, save, finalize }: { review: api.Review; update: (fn: (value: api.Review) => api.Review) => void; busy: boolean; save: () => void; finalize: () => void }) {

@@ -33,9 +33,24 @@ TRUSTED_ORIGINS = {
     "http://localhost:5173",
 }
 MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024
-DOWNLOAD_SUFFIXES = {".md", ".html", ".pdf", ".json", ".yaml"}
 Runner = Callable[..., Any]
 Readiness = Callable[[], ReadinessReport]
+
+ARTIFACT_ROLES = {
+    ("transcribe", "markdown"): "transcript",
+    ("render", "digest"): "digest",
+    ("render", "markdown"): "minutes",
+    ("render", "html"): "minutes",
+    ("export_pdf", "pdf"): "minutes",
+}
+FORMAT_LABELS = {
+    ".md": "Markdown",
+    ".html": "HTML",
+    ".pdf": "PDF",
+    ".json": "JSON",
+    ".yaml": "YAML",
+}
+FINALIZATION_STAGES = ("approve", "render", "export_pdf", "validate")
 
 
 def _durable_job(manifest: Any) -> dict[str, Any] | None:
@@ -84,6 +99,67 @@ def _job_for_meeting(path: Path) -> dict[str, Any] | None:
     except PipelineError:
         # A review-only legacy directory has no pipeline execution state yet.
         return None
+
+
+def _artifact_records(path: Path) -> list[dict[str, str | bool]]:
+    """Expose only current manifest artifacts; legacy files remain untouched but undiscoverable."""
+    try:
+        manifest = load_manifest(path / "manifest.json")
+    except PipelineError:
+        return []
+
+    stages = manifest.stages
+    validated = all(
+        stages.get(stage) is not None
+        and stages[stage].status == "complete"
+        and stages[stage].artifacts
+        and all(Path(value).is_file() for value in stages[stage].artifacts.values())
+        for stage in FINALIZATION_STAGES
+    )
+    records: list[dict[str, str | bool]] = []
+    exposed_paths: set[Path] = set()
+    for stage, label in ARTIFACT_ROLES:
+        state = stages.get(stage)
+        artifact = state.artifacts.get(label) if state and state.status == "complete" else None
+        if artifact is None:
+            continue
+        candidate = Path(artifact)
+        if not candidate.is_file() or candidate.resolve().parent != path.resolve():
+            continue
+        exposed_paths.add(candidate.resolve())
+        role = ARTIFACT_ROLES[(stage, label)]
+        records.append(
+            {
+                "name": candidate.name,
+                "role": role,
+                "format": FORMAT_LABELS.get(
+                    candidate.suffix.lower(), candidate.suffix.upper().lstrip(".")
+                ),
+                "final": role == "minutes" and validated,
+            }
+        )
+    for state in stages.values():
+        if state.status != "complete":
+            continue
+        for artifact in state.artifacts.values():
+            candidate = Path(artifact)
+            if (
+                not candidate.is_file()
+                or candidate.resolve() in exposed_paths
+                or candidate.resolve().parent != path.resolve()
+            ):
+                continue
+            records.append(
+                {
+                    "name": candidate.name,
+                    "role": "supporting",
+                    "format": FORMAT_LABELS.get(
+                        candidate.suffix.lower(), candidate.suffix.upper().lstrip(".")
+                    ),
+                    "final": False,
+                }
+            )
+    return records
 
 
 def _safe_date(value: str) -> date:
@@ -291,17 +367,12 @@ def create_app(
                 review = load_review(review_path).model_dump(mode="json")
             except PipelineError as exc:
                 review = {"error": str(exc)}
-        files = [
-            item.name
-            for item in sorted(path.iterdir())
-            if item.is_file() and item.suffix.lower() in DOWNLOAD_SUFFIXES
-        ]
         return {
             "date": meeting_date,
             "job": _job_for_meeting(path),
             "audio_analysis": audio_analysis,
             "review": review,
-            "files": files,
+            "artifacts": _artifact_records(path),
         }
 
     @app.put("/api/meetings/{meeting_date}/review")
@@ -354,13 +425,11 @@ def create_app(
     @app.get("/api/meetings/{meeting_date}/files/{filename}")
     def download(meeting_date: str, filename: str) -> FileResponse:
         path = meeting_path(meeting_date)
-        unsafe_name = Path(filename).name != filename
-        unsupported = Path(filename).suffix.lower() not in DOWNLOAD_SUFFIXES
-        if unsafe_name or unsupported:
+        if Path(filename).name != filename:
+            raise HTTPException(status_code=404, detail="file not found")
+        if filename not in {str(artifact["name"]) for artifact in _artifact_records(path)}:
             raise HTTPException(status_code=404, detail="file not found")
         target = path / filename
-        if not target.is_file():
-            raise HTTPException(status_code=404, detail="file not found")
         return FileResponse(target, filename=filename)
 
     assets = Path(static_dir).resolve() if static_dir else Path(__file__).parent / "_web"

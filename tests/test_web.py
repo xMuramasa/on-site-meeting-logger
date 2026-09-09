@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from meeting_pipeline.manifest import fail_stage, start_stage, write_manifest
+from meeting_pipeline.manifest import complete_stage, fail_stage, start_stage, write_manifest
 from meeting_pipeline.models import CanonicalActa, PipelineManifest
 from meeting_pipeline.readiness import ReadinessCheck, ReadinessReport
 from meeting_pipeline.review import generate_review
@@ -376,3 +376,63 @@ def test_cancel_and_restart_are_durable_and_resume_in_background(tmp_path):
     assert api.post("/api/meetings/2026-09-03/restart", headers=headers).status_code == 202
     assert not (meeting / "build" / ".cancel-requested").exists()
     assert calls == [(meeting, "generate_review")]
+
+
+def test_meeting_artifacts_are_manifest_backed_and_final_only_after_validation(tmp_path):
+    meeting = tmp_path / "meetings" / "2026-09-03"
+    meeting.mkdir(parents=True)
+    transcript = meeting / "manual-transcript.md"
+    digest = meeting / "renamed-digest.md"
+    markdown = meeting / "renamed-minutes.md"
+    html = meeting / "renamed-minutes.html"
+    pdf = meeting / "renamed-minutes.pdf"
+    approved = meeting / "build" / "acta-approved.json"
+    supporting = meeting / "review.yaml"
+    previous_pdf = meeting / "previous-acta.pdf"
+    approved.parent.mkdir()
+    for path in (transcript, digest, markdown, html, pdf, approved, supporting, previous_pdf):
+        path.write_text(path.name)
+    manifest = PipelineManifest.model_validate(
+        {
+            "pipeline_version": "test",
+            "meeting_dir": str(meeting),
+            "meeting_date": "2026-09-03",
+            "created_at": "2026-09-03T00:00:00Z",
+            "updated_at": "2026-09-03T00:00:00Z",
+            "source_filename": "meeting.webm",
+            "source_sha256": "a" * 64,
+        }
+    )
+    complete_stage(manifest, "transcribe", "transcribe", {"markdown": transcript})
+    complete_stage(manifest, "approve", "approve", {"approved": approved})
+    complete_stage(manifest, "generate_review", "review", {"review": supporting})
+    complete_stage(manifest, "render", "render", {"markdown": markdown, "html": html, "digest": digest})
+    complete_stage(manifest, "export_pdf", "pdf", {"pdf": pdf})
+    write_manifest(meeting / "manifest.json", manifest)
+
+    draft_detail = client(tmp_path).get("/api/meetings/2026-09-03").json()
+
+    assert draft_detail["artifacts"] == [
+        {"name": "manual-transcript.md", "role": "transcript", "format": "Markdown", "final": False},
+        {"name": "renamed-digest.md", "role": "digest", "format": "Markdown", "final": False},
+        {"name": "renamed-minutes.md", "role": "minutes", "format": "Markdown", "final": False},
+        {"name": "renamed-minutes.html", "role": "minutes", "format": "HTML", "final": False},
+        {"name": "renamed-minutes.pdf", "role": "minutes", "format": "PDF", "final": False},
+        {"name": "review.yaml", "role": "supporting", "format": "YAML", "final": False},
+    ]
+    assert client(tmp_path).get("/api/meetings/2026-09-03/files/previous-acta.pdf").status_code == 404
+
+    report = meeting / "build" / "validation-report.json"
+    report.parent.mkdir(exist_ok=True)
+    report.write_text("{}")
+    complete_stage(manifest, "validate", "validate", {"report": report})
+    write_manifest(meeting / "manifest.json", manifest)
+
+    final_detail = client(tmp_path).get("/api/meetings/2026-09-03").json()
+
+    assert [artifact["final"] for artifact in final_detail["artifacts"]] == [False, False, True, True, True, False]
+    assert client(tmp_path).get("/api/meetings/2026-09-03/files/renamed-minutes.pdf").status_code == 200
+
+    report.unlink()
+    stale_detail = client(tmp_path).get("/api/meetings/2026-09-03").json()
+    assert [artifact["final"] for artifact in stale_detail["artifacts"]] == [False] * 6

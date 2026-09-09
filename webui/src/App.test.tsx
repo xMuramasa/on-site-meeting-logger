@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ProcessingFailure, ReadinessPanel, ReviewForm } from "./App";
-import type { Job, Review } from "./api";
+import { Deliverables, ProcessingFailure, ReadinessPanel, ReviewForm } from "./App";
+import type { Artifact, Job, Review } from "./api";
 
 const review: Review = {
   participants: [],
@@ -78,6 +78,25 @@ describe("ReadinessPanel", () => {
     expect(markup).toContain("Inicia el servidor de modelo local y confirma que responde.");
     expect(markup).toContain("El modelo configurado no está disponible; verifica el nombre configurado.");
     expect(markup).toContain("Volver a comprobar");
+
+  });
+});
+
+describe("Deliverables", () => {
+  it("separates manifest artifact roles and does not call a transcript final", () => {
+    const artifacts: Artifact[] = [
+      { name: "manual-transcript.md", role: "transcript", format: "Markdown", final: false },
+      { name: "digest-renamed.md", role: "digest", format: "Markdown", final: false },
+      { name: "minutes-renamed.pdf", role: "minutes", format: "PDF", final: true },
+    ];
+
+    const markup = renderToStaticMarkup(<Deliverables meetingDate="2026-09-03" artifacts={artifacts} />);
+
+    expect(markup).toContain("Acta final · PDF");
+    expect(markup).toContain("Transcripción · Markdown");
+    expect(markup).toContain("Resumen · Markdown");
+    expect(markup).toContain("manual-transcript.md");
+    expect(markup).not.toContain("Transcripción final");
 
   });
 });
