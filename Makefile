@@ -70,8 +70,4 @@ build: frontend-build ## Build the Python wheel and source archive
 	uv build
 
 doctor: ## Check required local executables
-	@command -v uv >/dev/null && echo "uv: ok" || { echo "uv: missing"; exit 1; }
-	@command -v ffmpeg >/dev/null && echo "ffmpeg: ok" || { echo "ffmpeg: missing"; exit 1; }
-	@command -v ffprobe >/dev/null && echo "ffprobe: ok" || { echo "ffprobe: missing"; exit 1; }
-	@command -v llama-server >/dev/null && echo "llama-server: ok" || { echo "llama-server: missing"; exit 1; }
-	@command -v bun >/dev/null && echo "bun: ok" || { echo "bun: missing"; exit 1; }
+	uv run meeting doctor --output-root $(OUTPUT_ROOT) --config $(CONFIG)

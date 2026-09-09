@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from meeting_pipeline.models import CanonicalActa, PipelineManifest
+from meeting_pipeline.readiness import ReadinessCheck, ReadinessReport
 from meeting_pipeline.review import generate_review
 from meeting_pipeline.web import create_app
 
@@ -14,12 +15,14 @@ def client(
     tmp_path: Path,
     runner=lambda *_args, **_kwargs: None,
     static_dir: Path | None = None,
+    readiness=lambda: ReadinessReport(checks=[]),
 ) -> TestClient:
     app = create_app(
         output_root=tmp_path / "meetings",
         csrf_token="test-csrf-token",
         runner=runner,
         static_dir=static_dir,
+        readiness=readiness,
     )
     return TestClient(app, base_url="http://127.0.0.1:8765")
 
@@ -58,6 +61,26 @@ def test_bootstrap_is_loopback_only_and_returns_csrf(tmp_path):
 
     rejected = client(tmp_path).get("/api/bootstrap", headers={"host": "evil.example"})
     assert rejected.status_code == 400
+
+
+def test_upload_is_rejected_before_ingest_when_readiness_fails(tmp_path):
+    report = ReadinessReport(
+        checks=[ReadinessCheck(name="model-endpoint", ok=False, detail="connection refused")]
+    )
+    api = client(tmp_path, readiness=lambda: report)
+
+    bootstrap = api.get("/api/bootstrap")
+    response = api.post(
+        "/api/meetings",
+        headers={"origin": "http://127.0.0.1:8765", "x-csrf-token": "test-csrf-token"},
+        data={"meeting_date": "2026-09-03"},
+        files={"audio": ("meeting.m4a", b"audio", "audio/mp4")},
+    )
+
+    assert bootstrap.json()["readiness"] == report.model_dump(mode="json")
+    assert response.status_code == 503
+    assert response.json()["detail"] == "pipeline is not ready: model-endpoint: connection refused"
+    assert not (tmp_path / "meetings" / "2026-09-03").exists()
 
 
 def test_upload_accepts_browser_recording_and_starts_draft(tmp_path):

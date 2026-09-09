@@ -5,6 +5,7 @@ from meeting_pipeline.cli import app
 runner = CliRunner()
 
 EXPECTED_COMMANDS = [
+    "doctor",
     "inspect",
     "transcribe",
     "extract-context",

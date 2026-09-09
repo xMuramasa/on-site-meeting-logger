@@ -49,6 +49,29 @@ def _report(paths: dict[str, Path] | dict[str, object]) -> None:
 
 
 @app.command()
+def doctor(
+    output_root: Path = typer.Option(
+        Path.home() / "Recordings",
+        "--output-root",
+        help="Directory where meeting artifacts will be written.",
+    ),
+    config: Path | None = ConfigOpt,
+) -> None:
+    """Check local model, transcription, PDF, storage, and executable readiness."""
+    from .config import load_config
+    from .readiness import check_readiness
+
+    try:
+        report = check_readiness(load_config(config), output_root)
+    except PipelineError as exc:
+        _fail(exc)
+        return
+    typer.echo(json.dumps(report.model_dump(mode="json"), indent=2, ensure_ascii=False))
+    if not report.ok:
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def inspect(
     audio: Path = AudioOpt,
     meeting_dir: Path | None = typer.Option(None, "--meeting-dir", help="Write metadata here."),

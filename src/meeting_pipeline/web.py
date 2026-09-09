@@ -21,6 +21,7 @@ from .ingest import SUPPORTED_AUDIO, ingest_meeting
 from .manifest import load_manifest, write_text_atomic
 from .models import ReviewState
 from .pipeline import run_stages
+from .readiness import ReadinessCheck, ReadinessReport, check_readiness
 from .review import load_review
 
 TRUSTED_ORIGINS = {
@@ -34,6 +35,7 @@ TRUSTED_ORIGINS = {
 MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024
 DOWNLOAD_SUFFIXES = {".md", ".html", ".pdf", ".json", ".yaml"}
 Runner = Callable[..., Any]
+Readiness = Callable[[], ReadinessReport]
 
 
 def _safe_date(value: str) -> date:
@@ -79,12 +81,25 @@ def create_app(
     runner: Runner = run_stages,
     static_dir: Path | None = None,
     allowed_origins: set[str] | None = None,
+    readiness: Readiness | None = None,
 ) -> FastAPI:
     """Create an app that can only mutate local pipeline state."""
     root = Path(output_root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     incoming = root / ".incoming"
     incoming.mkdir(mode=0o700, exist_ok=True)
+    if readiness is None:
+
+        def readiness() -> ReadinessReport:
+            try:
+                from .config import load_config
+
+                return check_readiness(load_config(config_path), root)
+            except PipelineError as exc:
+                return ReadinessReport(
+                    checks=[ReadinessCheck(name="configuration", ok=False, detail=str(exc))]
+                )
+
     token = csrf_token or secrets.token_urlsafe(32)
     origins = allowed_origins or TRUSTED_ORIGINS
     jobs: dict[str, dict[str, str]] = {}
@@ -144,11 +159,13 @@ def create_app(
 
     @app.get("/api/bootstrap")
     def bootstrap() -> dict[str, Any]:
+        report = readiness()
         return {
             "csrf_token": token,
             "output_root": str(root),
             "accepted_audio": sorted(SUPPORTED_AUDIO),
             "recording_supported": True,
+            "readiness": report.model_dump(mode="json"),
         }
 
     @app.get("/api/meetings")
@@ -179,6 +196,12 @@ def create_app(
         audio: UploadFile = File(...),
         previous_acta: UploadFile | None = File(None),
     ) -> dict[str, Any]:
+        report = readiness()
+        if not report.ok:
+            failures = "; ".join(
+                f"{check.name}: {check.detail}" for check in report.checks if not check.ok
+            )
+            raise HTTPException(status_code=503, detail=f"pipeline is not ready: {failures}")
         parsed = _safe_date(meeting_date)
         request_dir = incoming / secrets.token_urlsafe(16)
         request_dir.mkdir(mode=0o700)
