@@ -12,6 +12,7 @@ dist/
 acceptance-output/
 .worktrees/
 .hermes-qa-*
+evaluation-report.json
 # Meeting recordings, transcripts, reviews, and generated actas are local-only.
 meeting-artifacts/
 recordings/

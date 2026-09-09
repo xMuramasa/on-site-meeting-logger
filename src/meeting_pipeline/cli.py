@@ -187,6 +187,22 @@ def validate(
 
 
 @app.command()
+def evaluate(
+    meeting_dir: Path = MeetingDirOpt,
+    config: Path | None = ConfigOpt,
+) -> None:
+    """Replay a reviewed meeting and write aggregate local-only model quality metrics."""
+    from .evaluation import evaluate_reviewed_meeting
+
+    try:
+        report_path = evaluate_reviewed_meeting(meeting_dir, config)
+    except (OSError, PipelineError) as exc:
+        _fail(exc)
+        return
+    typer.echo(f"wrote {report_path}")
+
+
+@app.command()
 def process(
     audio: Path = AudioOpt,
     previous_acta: Path | None = PreviousOpt,

@@ -26,6 +26,7 @@ GENERATED_ARTIFACT_FILENAMES = {
     "acta-approved.json",
     "acta-draft.json",
     "digest.md",
+    "evaluation-report.json",
     "extractions.json",
     "manifest.json",
     "review.yaml",

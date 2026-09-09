@@ -12,6 +12,7 @@ EXPECTED_COMMANDS = [
     "draft",
     "finalize",
     "validate",
+    "evaluate",
     "process",
     "serve",
 ]
@@ -32,3 +33,17 @@ def test_every_command_has_its_own_help():
 
 def test_unknown_command_fails():
     assert runner.invoke(app, ["definitely-not-a-command"]).exit_code != 0
+
+
+def test_evaluate_runs_the_local_replay_and_reports_its_path(monkeypatch, tmp_path):
+    report_path = tmp_path / "build" / "evaluation-report.json"
+
+    monkeypatch.setattr(
+        "meeting_pipeline.evaluation.evaluate_reviewed_meeting",
+        lambda meeting_dir, config: report_path,
+    )
+
+    result = runner.invoke(app, ["evaluate", "--meeting-dir", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert str(report_path) in result.output

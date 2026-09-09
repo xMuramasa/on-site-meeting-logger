@@ -63,6 +63,18 @@ def test_hygiene_check_rejects_staged_recordings_and_transcripts(tmp_path: Path)
     assert "tracked meeting artifact: transcript.md" in result.stderr
 
 
+def test_hygiene_check_rejects_a_staged_evaluation_report(tmp_path: Path):
+    _init_repo(tmp_path)
+    report = tmp_path / "evaluation-report.json"
+    report.write_text('{"unsupported_claims": 0}\n', encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-f", report.name], check=True)
+
+    result = _run(tmp_path)
+
+    assert result.returncode == 1
+    assert "tracked meeting artifact: evaluation-report.json" in result.stderr
+
+
 def test_hygiene_check_rejects_tracked_hermes_qa_transcripts(tmp_path: Path):
     _init_repo(tmp_path)
     transcript = tmp_path / ".hermes-qa-transcript-2026-09-07.txt"
