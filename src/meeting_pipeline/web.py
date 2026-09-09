@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import secrets
 import shutil
-import threading
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
@@ -18,9 +17,9 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .errors import PipelineError
 from .ingest import SUPPORTED_AUDIO, ingest_meeting
-from .manifest import load_manifest, write_text_atomic
+from .manifest import fail_stage, load_manifest, write_manifest, write_text_atomic
 from .models import ReviewState
-from .pipeline import run_stages
+from .pipeline import clear_cancellation, request_cancellation, run_stages
 from .readiness import ReadinessCheck, ReadinessReport, check_readiness
 from .review import load_review
 
@@ -36,6 +35,32 @@ MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024
 DOWNLOAD_SUFFIXES = {".md", ".html", ".pdf", ".json", ".yaml"}
 Runner = Callable[..., Any]
 Readiness = Callable[[], ReadinessReport]
+
+
+def _durable_job(manifest: Any) -> dict[str, str] | None:
+    """Project API job status from the durable per-stage manifest, never process memory."""
+    states = list(manifest.stages.items())
+    for name, state in reversed(states):
+        if state.status == "running":
+            return {"status": "running", "stage": name}
+    for name, state in reversed(states):
+        if state.status in {"failed", "cancelled"}:
+            result = {"status": state.status, "stage": name}
+            if state.note:
+                result["error"] = state.note
+            return result
+    for name, state in reversed(states):
+        if state.status == "complete":
+            return {"status": "complete", "stage": name}
+    return None
+
+
+def _job_for_meeting(path: Path) -> dict[str, str] | None:
+    try:
+        return _durable_job(load_manifest(path / "manifest.json"))
+    except PipelineError:
+        # A review-only legacy directory has no pipeline execution state yet.
+        return None
 
 
 def _safe_date(value: str) -> date:
@@ -102,13 +127,12 @@ def create_app(
 
     token = csrf_token or secrets.token_urlsafe(32)
     origins = allowed_origins or TRUSTED_ORIGINS
-    jobs: dict[str, dict[str, str]] = {}
-    lock = threading.RLock()
+
 
     app = FastAPI(title="Meeting Studio", docs_url=None, redoc_url=None)
     app.state.output_root = root
     app.state.csrf_token = token
-    app.state.jobs = jobs
+
     app.add_middleware(
         TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"]
     )
@@ -138,17 +162,17 @@ def create_app(
         response.headers["Permissions-Policy"] = "microphone=(self)"
         return response
 
-    def start_job(key: str, meeting_dir: Path, until: str) -> None:
-        with lock:
-            jobs[key] = {"status": "running", "stage": until}
+    def start_job(meeting_dir: Path, until: str) -> None:
         try:
             runner(meeting_dir, until=until, config_path=config_path)
-        except Exception as exc:  # surfaced in job status, never source contents
-            with lock:
-                jobs[key] = {"status": "failed", "stage": until, "error": str(exc)}
-        else:
-            with lock:
-                jobs[key] = {"status": "complete", "stage": until}
+        except Exception:
+            # run_stages persists its active stage. This keeps custom runners safe too.
+            manifest_path = meeting_dir / "manifest.json"
+            if manifest_path.is_file():
+                manifest = load_manifest(manifest_path)
+                if not any(state.status == "failed" for state in manifest.stages.values()):
+                    fail_stage(manifest, until, "PipelineError: processing failed")
+                    write_manifest(manifest_path, manifest)
 
     def meeting_path(value: str) -> Path:
         parsed = _safe_date(value)
@@ -184,7 +208,7 @@ def create_app(
                     "stages": {
                         name: state.status for name, state in manifest.stages.items()
                     },
-                    "job": jobs.get(key),
+                    "job": _durable_job(manifest),
                 }
             )
         return {"meetings": items}
@@ -217,7 +241,7 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         finally:
             shutil.rmtree(request_dir, ignore_errors=True)
-        background.add_task(start_job, parsed.isoformat(), meeting_dir, "generate_review")
+        background.add_task(start_job, meeting_dir, "generate_review")
         return {"date": parsed.isoformat(), "status": "accepted"}
 
     @app.get("/api/meetings/{meeting_date}")
@@ -237,7 +261,7 @@ def create_app(
         ]
         return {
             "date": meeting_date,
-            "job": jobs.get(meeting_date),
+            "job": _job_for_meeting(path),
             "review": review,
             "files": files,
         }
@@ -260,7 +284,26 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         if not review.approve_for_final_render:
             raise HTTPException(status_code=409, detail="approve the review before finalizing")
-        background.add_task(start_job, meeting_date, path, "validate")
+        background.add_task(start_job, path, "validate")
+        return {"date": meeting_date, "status": "accepted"}
+
+    @app.post("/api/meetings/{meeting_date}/cancel", status_code=202)
+    def cancel(meeting_date: str) -> dict[str, str]:
+        path = meeting_path(meeting_date)
+        request_cancellation(path)
+        return {"date": meeting_date, "status": "cancellation_requested"}
+
+    @app.post("/api/meetings/{meeting_date}/restart", status_code=202)
+    def restart(meeting_date: str, background: BackgroundTasks) -> dict[str, str]:
+        path = meeting_path(meeting_date)
+        clear_cancellation(path)
+        manifest = load_manifest(path / "manifest.json")
+        finalization_started = any(
+            name in {"approve", "render", "export_pdf", "validate"}
+            for name in manifest.stages
+        )
+        until = "validate" if finalization_started else "generate_review"
+        background.add_task(start_job, path, until)
         return {"date": meeting_date, "status": "accepted"}
 
     @app.get("/api/meetings/{meeting_date}/files/{filename}")

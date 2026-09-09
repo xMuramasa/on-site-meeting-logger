@@ -28,8 +28,11 @@ WebM/Opus as a fallback. ffmpeg/faster-whisper decode these formats downstream.
   removed.
 - The browser receives no model API key.
 
-The in-memory job display resets when the server restarts. Durable stage state remains in each
-meeting's `manifest.json`, so processing remains resumable.
+Every stage start, completion, failure, and cancellation is persisted in the meeting's
+`manifest.json`. The studio derives job display from that state, so a server restart retains
+failure details and the last completed stage. Cancel requests a cooperative stop; Reanudar clears
+that request and resumes from durable current artifacts. Only one pipeline process can change a
+meeting at a time.
 
 ## Frontend development
 

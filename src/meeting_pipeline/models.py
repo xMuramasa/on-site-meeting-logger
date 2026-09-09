@@ -435,13 +435,15 @@ class ReviewState(Strict):
     approve_for_final_render: bool = False
 
 
-StageStatus = Literal["pending", "complete", "failed"]
+StageStatus = Literal["pending", "running", "complete", "failed", "cancelled"]
 
 
 class StageState(Strict):
     status: StageStatus = "pending"
     fingerprint: str | None = None
+    started_at: datetime | None = None
     completed_at: datetime | None = None
+    failed_at: datetime | None = None
     artifacts: dict[str, str] = Field(default_factory=dict)
     note: str | None = None
 

@@ -47,3 +47,11 @@ class PdfError(PipelineError):
 
 class ValidationFailed(PipelineError):
     """One or more required output checks failed."""
+
+
+class PipelineBusyError(PipelineError):
+    """Another process is already changing this meeting's pipeline state."""
+
+
+class PipelineCancelled(PipelineError):
+    """An operator requested cancellation before the next durable stage transition."""

@@ -158,3 +158,25 @@ def test_pipeline_resumes_completed_reasoning_stages(tmp_path):
     first_calls = provider.calls
     run_stages(meeting_dir, until="generate_review", **kwargs)
     assert provider.calls == first_calls
+
+
+def test_pipeline_persists_sanitized_failure_for_every_stage(tmp_path):
+    audio = tmp_path / "input.m4a"
+    audio.write_bytes(b"fake audio")
+    meeting_dir = ingest_meeting(audio, None, date(2026, 8, 31), tmp_path / "out")
+
+    def broken_probe(_path):
+        raise RuntimeError("recording text: private meeting contents")
+
+    try:
+        run_stages(meeting_dir, until="inspect", audio_probe=broken_probe)
+    except RuntimeError:
+        pass
+    else:  # pragma: no cover - assertion is more useful than pytest.raises here
+        raise AssertionError("the injected stage failure must propagate")
+
+    stage = load_manifest(meeting_dir / "manifest.json").stages["inspect"]
+    assert stage.status == "failed"
+    assert stage.started_at is not None
+    assert stage.failed_at is not None
+    assert stage.note == "RuntimeError: processing failed"

@@ -11,14 +11,17 @@ from typing import Any
 from .audio import probe_audio
 from .chunking import chunk_transcript
 from .config import load_config
-from .errors import PipelineError
+from .errors import PipelineCancelled, PipelineError
 from .manifest import (
+    cancel_stage,
     complete_stage,
     fail_stage,
     fingerprint,
     load_manifest,
+    meeting_lock,
     sha256_file,
     stage_is_current,
+    start_stage,
     write_json_atomic,
     write_manifest,
 )
@@ -66,7 +69,7 @@ def _all_artifacts(manifest: Any) -> dict[str, Path]:
     return result
 
 
-def run_stages(
+def _run_stages(
     meeting_dir: Path,
     until: str = "validate",
     config_path: Path | None = None,
@@ -95,8 +98,16 @@ def run_stages(
         return STAGES.index(stage) > target_index
 
     def commit(stage: str, fp: str, artifacts: dict[str, Path]) -> None:
+        if (build / ".cancel-requested").is_file():
+            raise PipelineCancelled("cancellation requested")
         complete_stage(manifest, stage, fp, artifacts)
         write_manifest(manifest_path, manifest)
+
+    def begin(stage: str) -> None:
+        start_stage(manifest, stage)
+        write_manifest(manifest_path, manifest)
+        if (build / ".cancel-requested").is_file():
+            raise PipelineCancelled("cancellation requested")
 
     # inspect
     stage = "inspect"
@@ -105,12 +116,13 @@ def run_stages(
     metadata_path = build / "audio-metadata.json"
     inspect_fp = fingerprint("inspect-v1", manifest.source_sha256)
     if not stage_is_current(manifest, stage, inspect_fp):
+        begin(stage)
         try:
             metadata = audio_probe(source)
             write_json_atomic(metadata_path, metadata.model_dump(mode="json"))
             commit(stage, inspect_fp, {"metadata": metadata_path})
         except Exception as exc:
-            fail_stage(manifest, stage, str(exc))
+            fail_stage(manifest, stage, _sanitized_failure(exc))
             write_manifest(manifest_path, manifest)
             raise
     metadata = _read_model(metadata_path, AudioMetadata)
@@ -124,6 +136,7 @@ def run_stages(
         "transcribe-v1", manifest.source_sha256, settings.transcription.model_dump(mode="json")
     )
     if not stage_is_current(manifest, stage, transcribe_fp):
+        begin(stage)
         transcript = transcribe_audio(
             source, metadata, settings.transcription, model=transcription_model
         )
@@ -140,6 +153,7 @@ def run_stages(
         "chunk-v1", sha256_file(transcript_path), settings.chunking.model_dump(mode="json")
     )
     if not stage_is_current(manifest, stage, chunk_fp):
+        begin(stage)
         chunks = chunk_transcript(
             transcript,
             target_tokens=settings.chunking.target_tokens,
@@ -162,6 +176,7 @@ def run_stages(
         [item.model_dump(mode="json") for item in settings.reference_participants],
     )
     if not stage_is_current(manifest, stage, context_fp):
+        begin(stage)
         prior_path = meeting_dir / "source" / "previous-acta.pdf"
         if manifest.previous_acta_sha256:
             context = extract_previous_context(prior_path, settings)
@@ -197,6 +212,7 @@ def run_stages(
         prompt_hashes,
     )
     if not stage_is_current(manifest, stage, consolidate_fp):
+        begin(stage)
         active_provider = provider or OpenAICompatibleProvider(settings.reasoning)
         fixed_meeting = {
             "date": manifest.meeting_date.isoformat(),
@@ -227,6 +243,7 @@ def run_stages(
     review_path = meeting_dir / "review.yaml"
     review_fp = fingerprint("review-v1", sha256_file(draft_path))
     if not stage_is_current(manifest, stage, review_fp):
+        begin(stage)
         generate_review(acta, review_path)
         commit(stage, review_fp, {"review": review_path})
     if until == stage:
@@ -237,6 +254,7 @@ def run_stages(
     approved_path = build / "acta-approved.json"
     approve_fp = fingerprint("approve-v1", sha256_file(draft_path), sha256_file(review_path))
     if not stage_is_current(manifest, stage, approve_fp):
+        begin(stage)
         approved = apply_review(acta, load_review(review_path))
         write_json_atomic(approved_path, approved.model_dump(mode="json"))
         commit(stage, approve_fp, {"approved": approved_path})
@@ -256,6 +274,7 @@ def run_stages(
         ],
     )
     if not stage_is_current(manifest, stage, render_fp):
+        begin(stage)
         rendered = render_documents(approved, meeting_dir)
         commit(stage, render_fp, rendered)
     if until == stage:
@@ -267,6 +286,7 @@ def run_stages(
     pdf_path = meeting_dir / f"{approved.meeting.slug()}.pdf"
     pdf_fp = fingerprint("pdf-v1", sha256_file(html_path), settings.pdf.model_dump(mode="json"))
     if not stage_is_current(manifest, stage, pdf_fp):
+        begin(stage)
         pdf_exporter(html_path, pdf_path, settings.pdf)
         commit(stage, pdf_fp, {"pdf": pdf_path})
     if until == stage:
@@ -283,7 +303,70 @@ def run_stages(
         settings.validation.model_dump(mode="json"),
     )
     if not stage_is_current(manifest, stage, validate_fp):
+        begin(stage)
         report = validate_meeting(meeting_dir, settings)
         require_valid(report)
         commit(stage, validate_fp, {"report": report_path})
     return PipelineResult(meeting_dir, stage, _all_artifacts(manifest))
+
+
+def _sanitized_failure(exc: Exception) -> str:
+    """Keep exception text and meeting content out of durable status and API responses."""
+    return f"{type(exc).__name__}: processing failed"
+
+
+def request_cancellation(meeting_dir: Path) -> None:
+    """Persist a cooperative cancellation request without contending for the active run lock."""
+    meeting_dir = Path(meeting_dir).expanduser().resolve()
+    write_json_atomic(meeting_dir / "build" / ".cancel-requested", {"requested": True})
+
+
+def clear_cancellation(meeting_dir: Path) -> None:
+    (Path(meeting_dir).expanduser().resolve() / "build" / ".cancel-requested").unlink(
+        missing_ok=True
+    )
+
+
+def run_stages(
+    meeting_dir: Path,
+    until: str = "validate",
+    config_path: Path | None = None,
+    force: bool = False,
+    provider: Any | None = None,
+    transcription_model: Any | None = None,
+    audio_probe: Callable[[Path], AudioMetadata] = probe_audio,
+    pdf_exporter: Callable[..., Path] = export_pdf,
+) -> PipelineResult:
+    """Run one meeting exclusively and leave every attempted stage durable and resumable."""
+    meeting_dir = Path(meeting_dir).expanduser().resolve()
+    manifest_path = meeting_dir / "manifest.json"
+    with meeting_lock(meeting_dir):
+        try:
+            return _run_stages(
+                meeting_dir,
+                until=until,
+                config_path=config_path,
+                force=force,
+                provider=provider,
+                transcription_model=transcription_model,
+                audio_probe=audio_probe,
+                pdf_exporter=pdf_exporter,
+            )
+        except Exception as exc:
+            if manifest_path.is_file():
+                manifest = load_manifest(manifest_path)
+                running = next(
+                    (
+                        name
+                        for name, state in manifest.stages.items()
+                        if state.status == "running"
+                    ),
+                    None,
+                )
+                if running:
+                    if isinstance(exc, PipelineCancelled):
+                        cancel_stage(manifest, running, "Cancellation requested")
+                    else:
+                        fail_stage(manifest, running, _sanitized_failure(exc))
+                    write_manifest(manifest_path, manifest)
+            raise

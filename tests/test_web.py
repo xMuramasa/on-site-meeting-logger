@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from meeting_pipeline.manifest import fail_stage, start_stage, write_manifest
 from meeting_pipeline.models import CanonicalActa, PipelineManifest
 from meeting_pipeline.readiness import ReadinessCheck, ReadinessReport
 from meeting_pipeline.review import generate_review
@@ -177,3 +178,60 @@ def test_meeting_api_exposes_relative_date_review_context(tmp_path):
             "resolved_date": None,
         },
     ]
+
+
+def test_meeting_api_derives_failed_job_from_durable_stage_state(tmp_path):
+    meeting = tmp_path / "meetings" / "2026-09-03"
+    source = meeting / "source" / "meeting.webm"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"audio")
+    manifest = PipelineManifest.model_validate(
+        {
+            "pipeline_version": "test",
+            "meeting_dir": str(meeting),
+            "meeting_date": "2026-09-03",
+            "created_at": "2026-09-03T00:00:00Z",
+            "updated_at": "2026-09-03T00:00:00Z",
+            "source_filename": "meeting.webm",
+            "source_sha256": "a" * 64,
+        }
+    )
+    start_stage(manifest, "transcribe")
+    fail_stage(manifest, "transcribe", "RuntimeError: processing failed")
+    write_manifest(meeting / "manifest.json", manifest)
+
+    detail = client(tmp_path).get("/api/meetings/2026-09-03").json()
+
+    assert detail["job"] == {
+        "status": "failed",
+        "stage": "transcribe",
+        "error": "RuntimeError: processing failed",
+    }
+
+
+def test_cancel_and_restart_are_durable_and_resume_in_background(tmp_path):
+    meeting = tmp_path / "meetings" / "2026-09-03"
+    source = meeting / "source" / "meeting.webm"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"audio")
+    manifest = PipelineManifest.model_validate(
+        {
+            "pipeline_version": "test",
+            "meeting_dir": str(meeting),
+            "meeting_date": "2026-09-03",
+            "created_at": "2026-09-03T00:00:00Z",
+            "updated_at": "2026-09-03T00:00:00Z",
+            "source_filename": "meeting.webm",
+            "source_sha256": "a" * 64,
+        }
+    )
+    write_manifest(meeting / "manifest.json", manifest)
+    calls = []
+    api = client(tmp_path, runner=lambda path, **kwargs: calls.append((Path(path), kwargs["until"])))
+    headers = {"origin": "http://127.0.0.1:8765", "x-csrf-token": "test-csrf-token"}
+
+    assert api.post("/api/meetings/2026-09-03/cancel", headers=headers).status_code == 202
+    assert (meeting / "build" / ".cancel-requested").is_file()
+    assert api.post("/api/meetings/2026-09-03/restart", headers=headers).status_code == 202
+    assert not (meeting / "build" / ".cancel-requested").exists()
+    assert calls == [(meeting, "generate_review")]

@@ -109,6 +109,18 @@ function App() {
     } finally { setBusy(false); }
   }
 
+  async function controlProcessing(action: "cancel" | "restart") {
+    if (!selected) return;
+    setBusy(true); setError("");
+    try {
+      await api[action](selected);
+      setNotice(action === "cancel" ? "Cancelación solicitada." : "Procesamiento reanudado.");
+      await refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "No se pudo actualizar el procesamiento");
+    } finally { setBusy(false); }
+  }
+
   function updateReview(change: (review: api.Review) => api.Review) {
     setDetail((value) => value?.review ? { ...value, review: change(value.review) } : value);
   }
@@ -181,7 +193,9 @@ function App() {
             <div className="meeting-detail">
               <div className="detail-head"><div><span className="eyebrow accent">REUNIÓN · {selected}</span><h1>Revisión del acta</h1><p>Confirma solamente lo que una persona pueda respaldar.</p></div><div className={`job-badge ${detail?.job?.status || "idle"}`}>{detail?.job?.status === "running" && <LoaderCircle className="spin" size={15} />}{detail?.job?.status === "failed" ? "Error" : detail?.job?.status === "running" ? "Procesando" : current?.stages.validate === "complete" ? "Validada" : "Lista"}</div></div>
 
-              {detail?.job?.status === "failed" && <div className="error-banner"><AlertCircle size={18} /><div><strong>El procesamiento se detuvo</strong><span>{detail.job.error}</span></div></div>}
+              {detail?.job?.status === "failed" && <div className="error-banner"><AlertCircle size={18} /><div><strong>El procesamiento se detuvo</strong><span>{detail.job.error}</span></div><button className="secondary-button" disabled={busy} onClick={() => controlProcessing("restart")}><RotateCcw size={16} /> Reanudar</button></div>}
+              {detail?.job?.status === "running" && <button className="secondary-button" disabled={busy} onClick={() => controlProcessing("cancel")}><CircleStop size={16} /> Cancelar</button>}
+              {detail?.job?.status === "cancelled" && <div className="error-banner"><CircleStop size={18} /><div><strong>Procesamiento cancelado</strong><span>{detail.job.error || "Puedes reanudar desde la última etapa completada."}</span></div><button className="secondary-button" disabled={busy} onClick={() => controlProcessing("restart")}><RotateCcw size={16} /> Reanudar</button></div>}
               <section className="progress-card">
                 {Object.entries(STAGE_LABELS).map(([key, label]) => <div className="stage" key={key}><StatusDot state={current?.stages[key]} /><span>{label}</span></div>)}
               </section>

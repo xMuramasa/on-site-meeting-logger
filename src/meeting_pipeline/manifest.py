@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -12,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from . import PIPELINE_VERSION
-from .errors import IngestError
+from .errors import IngestError, PipelineBusyError
 from .models import PipelineManifest, StageState
 
 
@@ -96,6 +97,7 @@ def complete_stage(
     manifest.stages[name] = StageState(
         status="complete",
         fingerprint=stage_fingerprint,
+        started_at=manifest.stages.get(name, StageState()).started_at or datetime.now(UTC),
         completed_at=datetime.now(UTC),
         artifacts=artifact_map,
     )
@@ -105,6 +107,35 @@ def fail_stage(manifest: PipelineManifest, name: str, note: str) -> None:
     state = manifest.stage(name)
     state.status = "failed"
     state.note = note
+    state.failed_at = datetime.now(UTC)
+
+
+def start_stage(manifest: PipelineManifest, name: str) -> None:
+    manifest.stages[name] = StageState(status="running", started_at=datetime.now(UTC))
+
+
+def cancel_stage(manifest: PipelineManifest, name: str, note: str) -> None:
+    state = manifest.stage(name)
+    state.status = "cancelled"
+    state.note = note
+    state.failed_at = datetime.now(UTC)
+
+
+@contextlib.contextmanager
+def meeting_lock(meeting_dir: Path):
+    """Hold a non-blocking advisory lock while changing one meeting's pipeline state."""
+    lock_path = Path(meeting_dir) / "build" / ".pipeline.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            message = "another pipeline run is already active for this meeting"
+            raise PipelineBusyError(message) from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def stage_is_current(manifest: PipelineManifest, name: str, stage_fingerprint: str) -> bool:

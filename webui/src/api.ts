@@ -13,7 +13,7 @@ export type Review = {
   quality_warnings: string[];
   approve_for_final_render: boolean;
 };
-export type Job = { status: "running" | "complete" | "failed"; stage: string; error?: string };
+export type Job = { status: "running" | "complete" | "failed" | "cancelled"; stage: string; error?: string };
 export type MeetingSummary = {
   date: string;
   source: string;
@@ -69,6 +69,20 @@ export async function saveReview(date: string, review: Review): Promise<void> {
 
 export async function finalize(date: string): Promise<void> {
   await parse(await fetch(`/api/meetings/${date}/finalize`, {
+    method: "POST",
+    headers: { "X-CSRF-Token": csrfToken },
+  }));
+}
+
+export async function cancel(date: string): Promise<void> {
+  await parse(await fetch(`/api/meetings/${date}/cancel`, {
+    method: "POST",
+    headers: { "X-CSRF-Token": csrfToken },
+  }));
+}
+
+export async function restart(date: string): Promise<void> {
+  await parse(await fetch(`/api/meetings/${date}/restart`, {
     method: "POST",
     headers: { "X-CSRF-Token": csrfToken },
   }));
