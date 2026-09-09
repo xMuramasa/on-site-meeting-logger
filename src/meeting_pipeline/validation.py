@@ -13,6 +13,7 @@ from .config import Settings, ValidationSettings
 from .errors import ValidationFailed
 from .manifest import write_json_atomic
 from .models import CanonicalActa, CheckResult, ValidationReport
+from .rendering import artifact_stem
 
 # Chromium's PDF text layer emits typographic ligatures, so a literal "Confidencial"
 # never matches the extracted "Conﬁdencial". Fold them before comparing phrases.
@@ -145,7 +146,7 @@ def validate_meeting(meeting_dir: Path, settings: Settings) -> ValidationReport:
         acta = None
         checks.append(CheckResult(name="approved-schema", ok=False, detail=str(exc)))
     if acta is not None:
-        base = acta.meeting.slug()
+        base = artifact_stem(acta, settings.branding)
         checks.extend(
             validate_rendered_semantics(
                 acta, meeting_dir / f"{base}.md", meeting_dir / f"{base}.html"

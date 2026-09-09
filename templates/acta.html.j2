@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Acta {{ acta.meeting.title }} — {{ acta.meeting.long_date() }}</title>
 <style>
-:root { --background: #ffffff; --foreground: #0a0a0a; --primary: #171717; --primary-foreground: #fafafa; --muted: #f5f5f5; --muted-foreground: #737373; --border: #e5e5e5; }
+:root { --background: #ffffff; --foreground: {{ branding.colors.foreground }}; --primary: {{ branding.colors.primary }}; --primary-foreground: {{ branding.colors.primary_foreground }}; --muted: {{ branding.colors.muted }}; --muted-foreground: {{ branding.colors.muted_foreground }}; --border: {{ branding.colors.border }}; }
 * { box-sizing: border-box; }
 html { background: var(--muted); }
 body { margin: 0 auto; width: 8.5in; min-height: 11in; padding: 1in; background: var(--background); color: #404040; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 11pt; line-height: 1.42; box-shadow: 0 8px 30px rgba(0,0,0,.10); }
@@ -33,12 +33,13 @@ ul { margin: 3px 0 0 17px; padding: 0; }
 li { margin: 3px 0; }
 .source-note { border-top: 1px solid var(--border); padding-top: 7px; color: var(--muted-foreground); font-size: 8.7pt; margin-top: 16px; break-inside: avoid; }
 .confidential { margin-top: 6px; font-size: 9pt; }
+.print-footer { display: none; }
 @page { size: Letter; margin: 1in; }
-@media print { html { background: white; } body { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; -webkit-print-color-adjust: exact; print-color-adjust: exact; } table, .context, .callout { break-inside: avoid; } .section-title { break-after: avoid; } p, .task { orphans: 3; widows: 3; } }
+@media print { html { background: white; } body { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; -webkit-print-color-adjust: exact; print-color-adjust: exact; } table, .context, .callout { break-inside: avoid; } .section-title { break-after: avoid; } p, .task { orphans: 3; widows: 3; } .print-footer { display: block; position: fixed; bottom: -0.72in; left: 0; right: 0; color: var(--muted-foreground); font-size: 8pt; text-align: center; } .page-number::after { content: counter(page); } }
 </style>
 </head>
 <body>
-<header class="masthead"><div class="title">ACTA DE REUNIÓN</div></header>
+<header class="masthead">{% if branding.logo_svg %}<div class="logo-svg">{{ branding.logo_svg | safe }}</div>{% endif %}<div class="title">{{ branding.logo_text or branding.organization_name or "ACTA DE REUNIÓN" }}</div></header>
 <div class="rule"></div>
 <div class="meta"><span><strong>Reunión:</strong> {{ acta.meeting.title }}</span><span>|</span><span><strong>Fecha:</strong> {{ acta.meeting.long_date() }}</span><span>|</span><span><strong>Lugar:</strong> {{ acta.meeting.location }}</span></div>
 <div class="participants-title">Participantes</div>
@@ -65,5 +66,6 @@ li { margin: 3px 0; }
 {% if acta.prior_follow_ups %}<section class="section"><h2 class="section-title">Seguimiento del acta anterior</h2><table><thead><tr><th>Compromiso</th><th>Estado</th><th>Detalle</th></tr></thead><tbody>{% for item in acta.prior_follow_ups %}<tr><td>{{ item.item }}</td><td>{{ item.status_label() }}</td><td>{{ item.detail }}{% if item.evidence %} <span class="time">{{ item.evidence | evidence }}</span>{% endif %}</td></tr>{% endfor %}</tbody></table></section>{% endif %}
 <div class="callout"><h2>Acuerdos y próximos pasos</h2><ul>{% for section in acta.sections %}{% for action in section.actions %}<li><strong>[{{ action.id }}]</strong> {{ action.outcome }} — {{ action.owner_display() }}; {{ action.due_display() }}.</li>{% endfor %}{% endfor %}</ul></div>
 {% if acta.quality_warnings %}<section class="section"><h2 class="section-title">Limitaciones</h2>{% for warning in acta.quality_warnings %}<p>{{ warning.note }}{% if warning.evidence %} <span class="time">{{ warning.evidence | evidence }}</span>{% endif %}</p>{% endfor %}</section>{% endif %}
-<div class="source-note">{{ acta.sources_note }}<div class="confidential">Documento confidencial</div></div>
+<div class="source-note">{{ acta.sources_note }}<div class="confidential">{{ branding.confidentiality_label }}</div></div>
+{% if branding.footer_text or branding.page_numbers %}<div class="print-footer">{% if branding.footer_text %}{{ branding.footer_text }}{% endif %}{% if branding.footer_text and branding.page_numbers %} · {% endif %}{% if branding.page_numbers %}Página <span class="page-number"></span>{% endif %}</div>{% endif %}
 </body></html>

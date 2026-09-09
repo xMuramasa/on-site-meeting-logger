@@ -77,6 +77,18 @@ Finalize:
 
 Finalization renders Markdown and HTML, exports the PDF, and refuses completion if validation fails.
 
+## Branding profiles
+
+`branding` is a configuration overlay, so the packaged templates remain neutral. It supports an
+organization name, inline SVG or text logo, print colors, confidentiality label, printable footer
+with page numbering, and an output filename prefix. Keep organization-specific profiles outside
+the repository and use one wherever a single config overlay is accepted:
+
+    uv run meeting serve --config /path/to/organization.yaml
+
+Change only its `branding` values. An embedded SVG keeps final HTML and PDFs self-contained and
+printable offline.
+
 ## Artifact boundary
 
 Recordings, transcripts, review files, intermediate JSON, and generated actas are local meeting

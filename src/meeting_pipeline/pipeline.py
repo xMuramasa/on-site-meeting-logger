@@ -30,7 +30,7 @@ from .pdf import export_pdf
 from .previous_context import extract_previous_context
 from .providers.openai_compatible import OpenAICompatibleProvider
 from .reasoning import generate_acta_draft, write_draft_artifacts
-from .rendering import render_documents
+from .rendering import artifact_stem, render_documents
 from .review import apply_review, generate_review, load_review
 from .transcription import transcribe_audio, write_transcript_files
 from .validation import require_valid, validate_meeting
@@ -266,8 +266,9 @@ def _run_stages(
     stage = "render"
     template_dir = Path(__file__).resolve().parents[2] / "templates"
     render_fp = fingerprint(
-        "render-v1",
+        "render-v2",
         sha256_file(approved_path),
+        settings.branding.model_dump(mode="json"),
         *[
             sha256_file(template_dir / name)
             for name in ("acta.md.j2", "acta.html.j2", "digest.md.j2")
@@ -275,16 +276,22 @@ def _run_stages(
     )
     if not stage_is_current(manifest, stage, render_fp):
         begin(stage)
-        rendered = render_documents(approved, meeting_dir)
+        rendered = render_documents(approved, meeting_dir, settings.branding)
         commit(stage, render_fp, rendered)
     if until == stage:
         return PipelineResult(meeting_dir, stage, _all_artifacts(manifest))
 
     # PDF
     stage = "export_pdf"
-    html_path = meeting_dir / f"{approved.meeting.slug()}.html"
-    pdf_path = meeting_dir / f"{approved.meeting.slug()}.pdf"
-    pdf_fp = fingerprint("pdf-v1", sha256_file(html_path), settings.pdf.model_dump(mode="json"))
+    document_stem = artifact_stem(approved, settings.branding)
+    html_path = meeting_dir / f"{document_stem}.html"
+    pdf_path = meeting_dir / f"{document_stem}.pdf"
+    pdf_fp = fingerprint(
+        "pdf-v2",
+        document_stem,
+        sha256_file(html_path),
+        settings.pdf.model_dump(mode="json"),
+    )
     if not stage_is_current(manifest, stage, pdf_fp):
         begin(stage)
         pdf_exporter(html_path, pdf_path, settings.pdf)
@@ -298,7 +305,7 @@ def _run_stages(
     validate_fp = fingerprint(
         "validate-v1",
         sha256_file(pdf_path),
-        sha256_file(meeting_dir / f"{approved.meeting.slug()}.md"),
+        sha256_file(meeting_dir / f"{document_stem}.md"),
         sha256_file(html_path),
         settings.validation.model_dump(mode="json"),
     )

@@ -75,6 +75,26 @@ class PdfSettings(_Base):
     timeout_seconds: int = Field(default=180, gt=0)
 
 
+class BrandColors(_Base):
+    primary: str = Field(default="#171717", pattern=r"^#[0-9a-fA-F]{6}$")
+    primary_foreground: str = Field(default="#fafafa", pattern=r"^#[0-9a-fA-F]{6}$")
+    foreground: str = Field(default="#0a0a0a", pattern=r"^#[0-9a-fA-F]{6}$")
+    muted: str = Field(default="#f5f5f5", pattern=r"^#[0-9a-fA-F]{6}$")
+    muted_foreground: str = Field(default="#737373", pattern=r"^#[0-9a-fA-F]{6}$")
+    border: str = Field(default="#e5e5e5", pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class BrandingSettings(_Base):
+    organization_name: str | None = None
+    logo_svg: str | None = None
+    logo_text: str | None = None
+    colors: BrandColors = Field(default_factory=BrandColors)
+    confidentiality_label: str = "Documento confidencial"
+    footer_text: str | None = None
+    page_numbers: bool = False
+    filename_prefix: str = Field(default="Acta_Reunion_Semanal", pattern=r"^[A-Za-z0-9_-]+$")
+
+
 class ValidationSettings(_Base):
     require_letter_pages: bool = True
     require_text_layer: bool = True
@@ -108,6 +128,7 @@ class Settings(_Base):
     reasoning: ReasoningSettings
     chunking: ChunkingSettings
     pdf: PdfSettings = Field(default_factory=PdfSettings)
+    branding: BrandingSettings = Field(default_factory=BrandingSettings)
     validation: ValidationSettings = Field(default_factory=ValidationSettings)
     glossary: Glossary = Field(default_factory=Glossary)
     reference_participants: list[ReferenceParticipant] = Field(default_factory=list)
@@ -128,6 +149,7 @@ class Settings(_Base):
                 "max_output_tokens": self.reasoning.max_output_tokens,
             },
             "chunking": self.chunking.model_dump(mode="json"),
+            "branding": self.branding.model_dump(mode="json"),
             "glossary": self.glossary.model_dump(mode="json"),
             "reference_participants": [
                 p.model_dump(mode="json") for p in self.reference_participants

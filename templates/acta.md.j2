@@ -1,4 +1,4 @@
-# Acta de Reunión
+# {% if branding.logo_text or branding.organization_name %}{{ branding.logo_text or branding.organization_name }} — {% endif %}Acta de Reunión
 
 - **Reunión:** {{ acta.meeting.title }}
 - **Fecha:** {{ acta.meeting.long_date() }}
@@ -84,4 +84,8 @@
 
 {{ acta.sources_note }}
 
-Documento confidencial
+{{ branding.confidentiality_label }}
+{% if branding.footer_text %}
+
+{{ branding.footer_text }}
+{% endif %}

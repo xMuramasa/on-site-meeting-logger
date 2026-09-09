@@ -13,6 +13,8 @@ acceptance-output/
 .worktrees/
 .hermes-qa-*
 evaluation-report.json
+# Organization-specific branding profiles are local-only.
+config/*-branding.yaml
 # Meeting recordings, transcripts, reviews, and generated actas are local-only.
 meeting-artifacts/
 recordings/

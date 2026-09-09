@@ -14,6 +14,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from markupsafe import Markup, escape
 
+from .config import BrandingSettings
 from .errors import RenderError
 from .manifest import write_text_atomic
 from .models import CanonicalActa, EvidenceRange, evidence_label
@@ -64,23 +65,30 @@ def _environment() -> Environment:
     return env
 
 
-def _context(acta: CanonicalActa) -> dict:
+def _context(acta: CanonicalActa, branding: BrandingSettings) -> dict:
     return {
         "acta": acta,
+        "branding": branding,
         "follow_up_number": max((s.number for s in acta.sections), default=0) + 1,
         "provenance_label": lambda key: PROVENANCE_LABELS.get(key, key),
     }
 
 
-def render_markdown(acta: CanonicalActa) -> str:
-    text = _environment().get_template("acta.md.j2").render(**_context(acta))
+def artifact_stem(acta: CanonicalActa, branding: BrandingSettings) -> str:
+    return f"{branding.filename_prefix}_{acta.meeting.date.isoformat()}"
+
+
+def render_markdown(acta: CanonicalActa, branding: BrandingSettings | None = None) -> str:
+    branding = branding or BrandingSettings()
+    text = _environment().get_template("acta.md.j2").render(**_context(acta, branding))
     # Markdown hard line breaks in the metadata block: two trailing spaces.
     text = re.sub(r"^(\*\*(?:Reunión|Fecha):\*\* .*?)$", r"\1  ", text, flags=re.M)
     return re.sub(r"\n{3,}", "\n\n", text).lstrip("\n")
 
 
-def render_html(acta: CanonicalActa) -> str:
-    html = _environment().get_template("acta.html.j2").render(**_context(acta))
+def render_html(acta: CanonicalActa, branding: BrandingSettings | None = None) -> str:
+    branding = branding or BrandingSettings()
+    html = _environment().get_template("acta.html.j2").render(**_context(acta, branding))
     offender = EXTERNAL_ASSET_PATTERN.search(html)
     if offender:
         raise RenderError(
@@ -90,12 +98,15 @@ def render_html(acta: CanonicalActa) -> str:
     return html
 
 
-def render_documents(acta: CanonicalActa, out_dir: Path) -> dict[str, Path]:
-    """Write `Acta_Reunion_Semanal_YYYY-MM-DD.{md,html}` plus digest.md."""
+def render_documents(
+    acta: CanonicalActa, out_dir: Path, branding: BrandingSettings | None = None
+) -> dict[str, Path]:
+    """Write configured-name Markdown and HTML documents plus digest.md."""
     out_dir = Path(out_dir)
-    slug = acta.meeting.slug()
+    branding = branding or BrandingSettings()
+    stem = artifact_stem(acta, branding)
     return {
-        "markdown": write_text_atomic(out_dir / f"{slug}.md", render_markdown(acta)),
-        "html": write_text_atomic(out_dir / f"{slug}.html", render_html(acta)),
+        "markdown": write_text_atomic(out_dir / f"{stem}.md", render_markdown(acta, branding)),
+        "html": write_text_atomic(out_dir / f"{stem}.html", render_html(acta, branding)),
         "digest": write_text_atomic(out_dir / "digest.md", render_digest(acta, [])),
     }
