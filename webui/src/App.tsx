@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import * as api from "./api";
+import { AudioPreview } from "./AudioPreview";
 import { formatDuration } from "./lib";
 import { useRecorder } from "./useRecorder";
 
@@ -181,6 +182,7 @@ function App() {
                   <span className="file-icon"><Upload size={20} /></span>
                   <span><strong>{audio?.name || "Elegir audio"}</strong><small>{audio ? `${(audio.size / 1048576).toFixed(1)} MB` : "M4A, WAV, MP3, MP4, WebM u OGG"}</small></span>
                 </label>
+                {selectedAudio && !capture.recording && <AudioPreview file={selectedAudio} />}
                 <div className="form-row">
                   <label><span>Fecha</span><div className="input-wrap"><CalendarDays size={16} /><input type="date" value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} required /></div></label>
                   <label><span>Acta anterior <em>opcional</em></span><div className="input-wrap file-compact"><FileText size={16} /><input type="file" accept="application/pdf,.pdf" onChange={(e) => setPrevious(e.target.files?.[0] || null)} /></div></label>

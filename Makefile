@@ -8,7 +8,7 @@ MODEL_FILE ?= Qwen3-8B-Q4_K_M.gguf
 MODEL_PORT ?= 8080
 MODEL_CONTEXT ?= 32768
 
-.PHONY: help setup model ui open frontend-install frontend-dev frontend-build test lint hygiene check build doctor
+.PHONY: help setup model output-dir ui open frontend-install frontend-dev frontend-build test lint hygiene check build doctor
 
 help: ## Show available commands
 	@printf "Meeting Pipeline\n\n"
@@ -30,7 +30,10 @@ model: ## Start Qwen3-8B through llama.cpp on localhost:8080
 		--ctx-size $(MODEL_CONTEXT) \
 		--jinja
 
-ui: ## Start the local web studio on localhost:8765
+output-dir: ## Create the meeting-artifact output directory
+	mkdir -p "$(OUTPUT_ROOT)"
+
+ui: output-dir ## Start the local web studio on localhost:8765
 	uv run meeting serve \
 		--output-root $(OUTPUT_ROOT) \
 		--config $(CONFIG) \
