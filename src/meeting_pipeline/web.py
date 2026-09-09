@@ -4,6 +4,7 @@ from __future__ import annotations
 import secrets
 import shutil
 from collections.abc import Callable
+from contextlib import suppress
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -18,7 +19,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .errors import PipelineError
 from .ingest import SUPPORTED_AUDIO, ingest_meeting
 from .manifest import fail_stage, load_manifest, meeting_lock, write_manifest, write_text_atomic
-from .models import ReviewState
+from .models import AudioLevelAnalysis, ReviewState
 from .pipeline import clear_cancellation, request_cancellation, run_stages
 from .readiness import ReadinessCheck, ReadinessReport, check_readiness
 from .review import load_review
@@ -276,6 +277,13 @@ def create_app(
     @app.get("/api/meetings/{meeting_date}")
     def get_meeting(meeting_date: str) -> dict[str, Any]:
         path = meeting_path(meeting_date)
+        analysis_path = path / "build" / "audio-levels.json"
+        audio_analysis = None
+        if analysis_path.is_file():
+            with suppress(OSError, ValueError):
+                audio_analysis = AudioLevelAnalysis.model_validate_json(
+                    analysis_path.read_text(encoding="utf-8")
+                ).model_dump(mode="json")
         review_path = path / "review.yaml"
         review = None
         if review_path.is_file():
@@ -291,6 +299,7 @@ def create_app(
         return {
             "date": meeting_date,
             "job": _job_for_meeting(path),
+            "audio_analysis": audio_analysis,
             "review": review,
             "files": files,
         }

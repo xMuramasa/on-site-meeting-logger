@@ -154,6 +154,13 @@ class AudioMetadata(Strict):
     format_name: str | None = None
 
 
+class AudioLevelAnalysis(Strict):
+    scanned_seconds: float = Field(gt=0.0, le=120.0)
+    mean_db: float
+    max_db: float
+    classification: Literal["silent", "quiet", "normal"]
+
+
 class Participant(Strict):
     name: str = Field(min_length=1)
     email: str | None = None

@@ -106,6 +106,20 @@ def test_upload_accepts_browser_recording_and_starts_draft(tmp_path):
     assert calls == [(meeting_dir, "generate_review")]
 
 
+def test_meeting_exposes_local_quiet_audio_warning_data(tmp_path):
+    meeting = tmp_path / "meetings" / "2026-09-03"
+    build = meeting / "build"
+    build.mkdir(parents=True)
+    (build / "audio-levels.json").write_text(
+        '{"scanned_seconds":120,"mean_db":-47,"max_db":-31,"classification":"quiet"}'
+    )
+
+    response = client(tmp_path).get("/api/meetings/2026-09-03")
+
+    assert response.status_code == 200
+    assert response.json()["audio_analysis"]["classification"] == "quiet"
+
+
 def test_mutations_require_trusted_origin_and_csrf(tmp_path):
     api = client(tmp_path)
     request = {

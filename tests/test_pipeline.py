@@ -3,12 +3,13 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 import yaml
 
 from meeting_pipeline.errors import AudioDecodeError, ModelUnavailableError, NoSpeechError
 from meeting_pipeline.ingest import ingest_meeting
 from meeting_pipeline.manifest import load_manifest
-from meeting_pipeline.models import AudioMetadata, CanonicalActa
+from meeting_pipeline.models import AudioLevelAnalysis, AudioMetadata, CanonicalActa
 from meeting_pipeline.pipeline import failure_diagnostic, run_stages
 from meeting_pipeline.reasoning import ChunkExtraction
 
@@ -66,6 +67,34 @@ def fake_probe(path):
         channels=1,
         duration_seconds=3132.309333,
     )
+
+
+def silent_analysis(_path):
+    return AudioLevelAnalysis(
+        scanned_seconds=120,
+        mean_db=-91.0,
+        max_db=-91.0,
+        classification="silent",
+    )
+
+
+def test_pipeline_rejects_silence_before_transcription_and_keeps_source(tmp_path):
+    audio = tmp_path / "input.m4a"
+    audio.write_bytes(b"original recording")
+    meeting_dir = ingest_meeting(audio, None, date(2026, 8, 31), tmp_path / "out")
+
+    with pytest.raises(NoSpeechError, match="No se detectó audio"):
+        run_stages(
+            meeting_dir,
+            until="transcribe",
+            transcription_model=FakeWhisper(),
+            audio_probe=fake_probe,
+            audio_level_inspector=silent_analysis,
+        )
+
+    assert (meeting_dir / "source" / "meeting.m4a").read_bytes() == b"original recording"
+    manifest = load_manifest(meeting_dir / "manifest.json")
+    assert manifest.stages["inspect"].status == "failed"
 
 
 def test_pipeline_runs_to_review_then_approved_render(tmp_path):

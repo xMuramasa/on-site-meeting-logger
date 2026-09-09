@@ -20,13 +20,26 @@ export type Job = {
   error_code?: FailureCode;
   retryable?: boolean;
 };
+export type AudioAnalysis = {
+  scanned_seconds: number;
+  mean_db: number;
+  max_db: number;
+  classification: "silent" | "quiet" | "normal";
+
+};
 export type MeetingSummary = {
   date: string;
   source: string;
   stages: Record<string, string>;
   job: Job | null;
 };
-export type MeetingDetail = { date: string; job: Job | null; review: Review | null; files: string[] };
+export type MeetingDetail = {
+  date: string;
+  job: Job | null;
+  audio_analysis: AudioAnalysis | null;
+  review: Review | null;
+  files: string[];
+};
 export type Bootstrap = { csrf_token: string; output_root: string; accepted_audio: string[]; recording_supported: boolean };
 
 let csrfToken = "";

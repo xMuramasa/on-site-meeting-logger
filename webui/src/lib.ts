@@ -13,3 +13,13 @@ export function recordingExtension(mimeType: string): string {
   if (mimeType.includes("ogg")) return "ogg";
   return "webm";
 }
+
+export function audioWarning(classification: "silent" | "quiet" | "normal"): string | null {
+  if (classification === "silent") {
+    return "No se detectó audio audible. Revisa el micrófono o graba el audio del sistema y vuelve a intentarlo.";
+  }
+  if (classification === "quiet") {
+    return "El nivel de audio es muy bajo. Acerca el micrófono o confirma que el audio del sistema esté incluido.";
+  }
+  return null;
+}

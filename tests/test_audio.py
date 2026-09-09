@@ -2,7 +2,12 @@ import json
 
 import pytest
 
-from meeting_pipeline.audio import parse_ffprobe_output, probe_audio
+from meeting_pipeline.audio import (
+    classify_audio_levels,
+    inspect_audio_levels,
+    parse_ffprobe_output,
+    probe_audio,
+)
 from meeting_pipeline.errors import AudioError
 
 PROBE = {
@@ -53,4 +58,45 @@ def test_probe_audio_invokes_ffprobe_without_shell(tmp_path, monkeypatch):
     probe_audio(audio)
     assert seen["args"][0] == "ffprobe"
     assert seen["args"][-1] == str(audio)
+    assert seen["kwargs"].get("shell") is not True
+
+
+@pytest.mark.parametrize(
+    ("mean_db", "max_db", "expected"),
+    [
+        (-91.0, -91.0, "silent"),
+        (-47.0, -31.0, "quiet"),
+        (-22.0, -3.0, "normal"),
+    ],
+)
+def test_classify_audio_levels_distinguishes_synthetic_silence_quiet_and_speech(
+    mean_db, max_db, expected
+):
+    assert classify_audio_levels(mean_db, max_db) == expected
+
+
+def test_inspect_audio_levels_uses_a_bounded_local_decode(tmp_path, monkeypatch):
+    audio = tmp_path / "large-recording.m4a"
+    audio.write_bytes(b"large recording")
+    seen = {}
+
+    class Result:
+        returncode = 0
+        stderr = "[Parsed_volumedetect_0] mean_volume: -47.0 dB\n[Parsed_volumedetect_0] max_volume: -31.0 dB\n"
+
+    def fake_run(args, **kwargs):
+        seen["args"] = args
+        seen["kwargs"] = kwargs
+        return Result()
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    analysis = inspect_audio_levels(audio)
+
+    assert analysis.classification == "quiet"
+    assert analysis.mean_db == -47.0
+    assert analysis.max_db == -31.0
+    assert seen["args"][:2] == ["ffmpeg", "-v"]
+    assert seen["args"][seen["args"].index("-t") + 1] == "120"
+    assert seen["args"][-1] == "-"
     assert seen["kwargs"].get("shell") is not True

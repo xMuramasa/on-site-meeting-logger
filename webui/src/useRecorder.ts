@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { recordingExtension } from "./lib";
+import { audioWarning, recordingExtension } from "./lib";
 
 export function useRecorder() {
   const [recording, setRecording] = useState(false);
@@ -7,11 +7,13 @@ export function useRecorder() {
   const [level, setLevel] = useState(0);
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState("");
+  const [warning, setWarning] = useState("");
   const recorder = useRef<MediaRecorder | null>(null);
   const stream = useRef<MediaStream | null>(null);
   const audioContext = useRef<AudioContext | null>(null);
   const timer = useRef<number | null>(null);
   const frame = useRef<number | null>(null);
+  const peak = useRef(0);
 
   const cleanup = () => {
     if (timer.current) window.clearInterval(timer.current);
@@ -29,7 +31,9 @@ export function useRecorder() {
 
   const start = async () => {
     setError("");
+    setWarning("");
     setFile(null);
+    peak.current = 0;
     try {
       const media = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -45,6 +49,7 @@ export function useRecorder() {
         const actualType = instance.mimeType || mimeType || "audio/webm";
         const blob = new Blob(chunks, { type: actualType });
         setFile(new File([blob], `grabacion.${recordingExtension(actualType)}`, { type: actualType }));
+        setWarning(audioWarning(peak.current <= 0.01 ? "silent" : peak.current <= 0.04 ? "quiet" : "normal") || "");
         cleanup();
       };
       const context = new AudioContext();
@@ -55,7 +60,9 @@ export function useRecorder() {
       const values = new Uint8Array(analyser.frequencyBinCount);
       const sample = () => {
         analyser.getByteFrequencyData(values);
-        setLevel(values.reduce((sum, value) => sum + value, 0) / values.length / 255);
+        const nextLevel = values.reduce((sum, value) => sum + value, 0) / values.length / 255;
+        peak.current = Math.max(peak.current, nextLevel);
+        setLevel(nextLevel);
         frame.current = requestAnimationFrame(sample);
       };
       sample();
@@ -73,6 +80,6 @@ export function useRecorder() {
     if (recorder.current?.state === "recording") recorder.current.stop();
     setRecording(false);
   };
-  const discard = () => { setFile(null); setElapsed(0); setError(""); };
-  return { recording, elapsed, level, file, error, start, stop, discard };
+  const discard = () => { setFile(null); setElapsed(0); setError(""); setWarning(""); };
+  return { recording, elapsed, level, file, error, warning, start, stop, discard };
 }

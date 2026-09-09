@@ -22,7 +22,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import * as api from "./api";
 import { AudioPreview } from "./AudioPreview";
-import { formatDuration } from "./lib";
+import { audioWarning, formatDuration } from "./lib";
 import { useRecorder } from "./useRecorder";
 
 const STAGE_LABELS: Record<string, string> = {
@@ -191,6 +191,7 @@ function App() {
                   </div>
                   {capture.file && <button type="button" className="text-button" onClick={capture.discard}><RotateCcw size={14} /> Descartar</button>}
                 </div>
+                <p className="capture-help">El micrófono solo capta lo que oye el Mac. Para una llamada, selecciona una entrada que incluya el audio del sistema o sube la grabación de la plataforma.</p>
                 <div className="or"><span>o selecciona archivos</span></div>
                 <label className="file-drop">
                   <input type="file" accept="audio/*,.m4a,.mp3,.wav,.mp4,.webm,.ogg" onChange={(event) => { setAudio(event.target.files?.[0] || null); capture.discard(); }} />
@@ -204,6 +205,7 @@ function App() {
                 </div>
                 <button className="primary-button" disabled={!selectedAudio || busy}>{busy ? <LoaderCircle className="spin" size={18} /> : <Sparkles size={18} />}{busy ? "Preparando…" : "Crear borrador de acta"}</button>
                 {capture.error && <p className="inline-error"><AlertCircle size={15} /> {capture.error}</p>}
+                {capture.warning && <p className="inline-error"><AlertCircle size={15} /> {capture.warning}</p>}
               </form>
             </div>
           ) : (
@@ -211,6 +213,7 @@ function App() {
               <div className="detail-head"><div><span className="eyebrow accent">REUNIÓN · {selected}</span><h1>Revisión del acta</h1><p>Confirma solamente lo que una persona pueda respaldar.</p></div><div className={`job-badge ${detail?.job?.status || "idle"}`}>{detail?.job?.status === "running" && <LoaderCircle className="spin" size={15} />}{detail?.job?.status === "failed" ? "Error" : detail?.job?.status === "running" ? "Procesando" : current?.stages.validate === "complete" ? "Validada" : "Lista"}</div></div>
 
               {detail?.job?.status === "failed" && <ProcessingFailure job={detail.job} busy={busy} restart={() => controlProcessing("restart")} />}
+              {detail?.audio_analysis && audioWarning(detail.audio_analysis.classification) && <div className="error-banner"><AlertCircle size={18} /><div><strong>Revisa la fuente de audio</strong><span>{audioWarning(detail.audio_analysis.classification)}</span></div></div>}
               {detail?.job?.status === "running" && <button className="secondary-button" disabled={busy} onClick={() => controlProcessing("cancel")}><CircleStop size={16} /> Cancelar</button>}
               {detail?.job?.status === "cancelled" && <div className="error-banner"><CircleStop size={18} /><div><strong>Procesamiento cancelado</strong><span>Puedes reanudar desde la última etapa completada.</span></div><button className="secondary-button" disabled={busy} onClick={() => controlProcessing("restart")}><RotateCcw size={16} /> Reanudar</button></div>}
               <section className="progress-card">

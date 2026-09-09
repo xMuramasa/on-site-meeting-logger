@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .audio import probe_audio
+from .audio import inspect_audio_levels, probe_audio
 from .chunking import chunk_transcript
 from .config import load_config
 from .errors import (
@@ -19,6 +19,7 @@ from .errors import (
     PipelineCancelled,
     PipelineError,
 )
+
 from .manifest import (
     cancel_stage,
     complete_stage,
@@ -32,7 +33,7 @@ from .manifest import (
     write_json_atomic,
     write_manifest,
 )
-from .models import AudioMetadata, CanonicalActa, Transcript
+from .models import AudioLevelAnalysis, AudioMetadata, CanonicalActa, Transcript
 from .pdf import export_pdf
 from .previous_context import extract_previous_context
 from .providers.openai_compatible import OpenAICompatibleProvider
@@ -103,6 +104,7 @@ def _run_stages(
     provider: Any | None = None,
     transcription_model: Any | None = None,
     audio_probe: Callable[[Path], AudioMetadata] = probe_audio,
+    audio_level_inspector: Callable[[Path], AudioLevelAnalysis] | None = None,
     pdf_exporter: Callable[..., Path] = export_pdf,
 ) -> PipelineResult:
     meeting_dir = Path(meeting_dir).expanduser().resolve()
@@ -140,13 +142,24 @@ def _run_stages(
     if reached(stage):
         return PipelineResult(meeting_dir, until, _all_artifacts(manifest))
     metadata_path = build / "audio-metadata.json"
-    inspect_fp = fingerprint("inspect-v1", manifest.source_sha256)
+    inspect_fp = fingerprint("inspect-v2", manifest.source_sha256)
     if not stage_is_current(manifest, stage, inspect_fp):
         begin(stage)
         try:
             metadata = audio_probe(source)
             write_json_atomic(metadata_path, metadata.model_dump(mode="json"))
-            commit(stage, inspect_fp, {"metadata": metadata_path})
+            artifacts = {"metadata": metadata_path}
+            if audio_level_inspector is not None:
+                analysis = audio_level_inspector(source)
+                analysis_path = build / "audio-levels.json"
+                write_json_atomic(analysis_path, analysis.model_dump(mode="json"))
+                artifacts["levels"] = analysis_path
+                if analysis.classification == "silent":
+                    raise NoSpeechError(
+                        "No se detectó audio audible. Verifica que la grabación use el micrófono "
+                        "correcto o incluya el audio del sistema y vuelve a intentarlo."
+                    )
+            commit(stage, inspect_fp, artifacts)
         except Exception as exc:
             _fail_with_diagnostic(manifest, stage, exc)
             write_manifest(manifest_path, manifest)
@@ -355,6 +368,7 @@ def _fail_with_diagnostic(manifest: Any, stage: str, exc: Exception) -> None:
     )
 
 
+
 def request_cancellation(meeting_dir: Path) -> None:
     """Persist a cooperative cancellation request without contending for the active run lock."""
     meeting_dir = Path(meeting_dir).expanduser().resolve()
@@ -375,6 +389,7 @@ def run_stages(
     provider: Any | None = None,
     transcription_model: Any | None = None,
     audio_probe: Callable[[Path], AudioMetadata] = probe_audio,
+    audio_level_inspector: Callable[[Path], AudioLevelAnalysis] | None = None,
     pdf_exporter: Callable[..., Path] = export_pdf,
 ) -> PipelineResult:
     """Run one meeting exclusively and leave every attempted stage durable and resumable."""
@@ -390,6 +405,11 @@ def run_stages(
                 provider=provider,
                 transcription_model=transcription_model,
                 audio_probe=audio_probe,
+                audio_level_inspector=(
+                    inspect_audio_levels
+                    if audio_level_inspector is None and audio_probe is probe_audio
+                    else audio_level_inspector
+                ),
                 pdf_exporter=pdf_exporter,
             )
         except Exception as exc:
