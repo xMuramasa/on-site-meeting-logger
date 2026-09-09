@@ -137,6 +137,64 @@ def test_mutations_require_trusted_origin_and_csrf(tmp_path):
     )
 
 
+def test_custom_port_allows_only_its_configured_loopback_origin(tmp_path):
+    report = ReadinessReport(
+        checks=[ReadinessCheck(name="model-endpoint", ok=False, detail="connection refused")]
+    )
+    api = TestClient(
+        create_app(
+            output_root=tmp_path / "meetings",
+            csrf_token="test-csrf-token",
+            allowed_origins={"http://127.0.0.1:9123", "http://localhost:9123"},
+            readiness=lambda: report,
+        ),
+        base_url="http://127.0.0.1:9123",
+    )
+    request = {
+        "data": {"meeting_date": "2026-09-03"},
+        "files": {"audio": ("meeting.m4a", b"audio", "audio/mp4")},
+    }
+
+    trusted = api.post(
+        "/api/meetings",
+        headers={"origin": "http://127.0.0.1:9123", "x-csrf-token": "test-csrf-token"},
+        **request,
+    )
+    hostile = api.post(
+        "/api/meetings",
+        headers={"origin": "http://127.0.0.1:9999", "x-csrf-token": "test-csrf-token"},
+        **request,
+    )
+
+    assert trusted.status_code == 503
+    assert hostile.status_code == 403
+    assert hostile.json() == {"detail": "untrusted origin"}
+
+
+def test_restart_rejects_the_previous_csrf_token_and_issues_a_new_one(tmp_path):
+    old = client(tmp_path)
+    old_token = old.get("/api/bootstrap").json()["csrf_token"]
+    restarted = TestClient(
+        create_app(
+            output_root=tmp_path / "meetings",
+            csrf_token="after-restart",
+            readiness=lambda: ReadinessReport(checks=[]),
+        ),
+        base_url="http://127.0.0.1:8765",
+    )
+
+    stale = restarted.post(
+        "/api/meetings",
+        headers={"origin": "http://127.0.0.1:8765", "x-csrf-token": old_token},
+        data={"meeting_date": "2026-09-03"},
+        files={"audio": ("meeting.m4a", b"audio", "audio/mp4")},
+    )
+
+    assert stale.status_code == 403
+    assert stale.json() == {"detail": "invalid CSRF token"}
+    assert restarted.get("/api/bootstrap").json()["csrf_token"] == "after-restart"
+
+
 def test_review_round_trip_and_finalize(tmp_path):
     meeting = tmp_path / "meetings" / "2026-09-03"
     meeting.mkdir(parents=True)

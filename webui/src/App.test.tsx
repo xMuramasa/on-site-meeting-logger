@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ProcessingFailure, ReviewForm } from "./App";
+import { ProcessingFailure, ReadinessPanel, ReviewForm } from "./App";
 import type { Job, Review } from "./api";
 
 const review: Review = {
@@ -55,5 +55,29 @@ describe("ProcessingFailure", () => {
     expect(markup).toContain("AUDIO_DECODE_FAILED");
     expect(markup).toContain("Convierte o vuelve a exportar el audio");
     expect(markup).not.toContain("Reanudar");
+  });
+});
+
+describe("ReadinessPanel", () => {
+  it("shows actionable diagnostics and offers a recheck before upload", () => {
+    const markup = renderToStaticMarkup(
+      <ReadinessPanel
+        readiness={{
+          ok: false,
+          checks: [
+            { name: "model-identity", ok: false, detail: "configured model missing" },
+            { name: "model-endpoint", ok: false, detail: "connection refused" },
+          ],
+        }}
+        busy={false}
+        recheck={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Antes de subir audio");
+    expect(markup).toContain("Inicia el servidor de modelo local y confirma que responde.");
+    expect(markup).toContain("El modelo configurado no está disponible; verifica el nombre configurado.");
+    expect(markup).toContain("Volver a comprobar");
+
   });
 });

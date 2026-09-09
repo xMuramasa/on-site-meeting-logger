@@ -106,6 +106,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .error-banner { background: #fef2f2; border: 1px solid var(--destructive); padding: 13px 16px; color: var(--destructive); display: flex; gap: 11px; border-radius: 8px; margin-bottom: 18px; }
 .error-banner strong, .error-banner span { display: block; font-size: 12px; }
 .error-banner span { margin-top: 3px; opacity: .8; }
+.readiness-panel > div { flex: 1; }
+.readiness-panel .secondary-button { align-self: center; flex: none; white-space: nowrap; }
 .empty-review { text-align: center; background: rgba(255,255,255,.55); border: 1px dashed var(--border); border-radius: 9px; padding: 65px 20px; color: var(--muted-foreground); }
 .empty-review h2 { color: var(--foreground); margin: 14px 0 5px; font-size: 17px; }
 .empty-review p { margin: 0; font-size: 12px; }

@@ -40,7 +40,16 @@ export type MeetingDetail = {
   review: Review | null;
   files: string[];
 };
-export type Bootstrap = { csrf_token: string; output_root: string; accepted_audio: string[]; recording_supported: boolean };
+export type ReadinessCheck = { name: string; ok: boolean; detail: string };
+export type Readiness = { ok: boolean; checks: ReadinessCheck[] };
+export type Bootstrap = {
+  csrf_token: string;
+  output_root: string;
+  accepted_audio: string[];
+  recording_supported: boolean;
+  readiness: Readiness;
+};
+
 
 let csrfToken = "";
 
@@ -52,6 +61,18 @@ async function parse<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function request<T>(input: RequestInfo | URL, init?: RequestInit, retryCsrf = true): Promise<T> {
+  const response = await fetch(input, init);
+  const detail = await response.clone().json().catch(() => ({} as { detail?: string }));
+  if (retryCsrf && response.status === 403 && detail.detail === "invalid CSRF token") {
+    await bootstrap();
+    const headers = new Headers(init?.headers);
+    if (headers.has("X-CSRF-Token")) headers.set("X-CSRF-Token", csrfToken);
+    return request(input, { ...init, headers }, false);
+  }
+  return parse<T>(response);
+}
+
 export async function bootstrap(): Promise<Bootstrap> {
   const data = await parse<Bootstrap>(await fetch("/api/bootstrap"));
   csrfToken = data.csrf_token;
@@ -59,11 +80,11 @@ export async function bootstrap(): Promise<Bootstrap> {
 }
 
 export async function meetings(): Promise<MeetingSummary[]> {
-  return (await parse<{ meetings: MeetingSummary[] }>(await fetch("/api/meetings"))).meetings;
+  return (await request<{ meetings: MeetingSummary[] }>("/api/meetings")).meetings;
 }
 
 export async function meeting(date: string): Promise<MeetingDetail> {
-  return parse(await fetch(`/api/meetings/${date}`));
+  return request(`/api/meetings/${date}`);
 }
 
 export async function uploadMeeting(date: string, audio: File, previous?: File): Promise<void> {
@@ -71,38 +92,38 @@ export async function uploadMeeting(date: string, audio: File, previous?: File):
   body.append("meeting_date", date);
   body.append("audio", audio);
   if (previous) body.append("previous_acta", previous);
-  await parse(await fetch("/api/meetings", {
+  await request("/api/meetings", {
     method: "POST",
     headers: { "X-CSRF-Token": csrfToken },
     body,
-  }));
+  });
 }
 
 export async function saveReview(date: string, review: Review): Promise<void> {
-  await parse(await fetch(`/api/meetings/${date}/review`, {
+  await request(`/api/meetings/${date}/review`, {
     method: "PUT",
     headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
     body: JSON.stringify(review),
-  }));
+  });
 }
 
 export async function finalize(date: string): Promise<void> {
-  await parse(await fetch(`/api/meetings/${date}/finalize`, {
+  await request(`/api/meetings/${date}/finalize`, {
     method: "POST",
     headers: { "X-CSRF-Token": csrfToken },
-  }));
+  });
 }
 
 export async function cancel(date: string): Promise<void> {
-  await parse(await fetch(`/api/meetings/${date}/cancel`, {
+  await request(`/api/meetings/${date}/cancel`, {
     method: "POST",
     headers: { "X-CSRF-Token": csrfToken },
-  }));
+  });
 }
 
 export async function restart(date: string): Promise<void> {
-  await parse(await fetch(`/api/meetings/${date}/restart`, {
+  await request(`/api/meetings/${date}/restart`, {
     method: "POST",
     headers: { "X-CSRF-Token": csrfToken },
-  }));
+  });
 }

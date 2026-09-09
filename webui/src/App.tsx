@@ -62,6 +62,34 @@ export function ProcessingFailure({ job, busy, restart }: { job: api.Job; busy: 
   return <div className="error-banner"><AlertCircle size={18} /><div><strong>El procesamiento se detuvo en: {stage}</strong><span><code>{code}</code> · {RECOVERY[code]}</span></div>{job.retryable !== false && <button className="secondary-button" disabled={busy} onClick={restart}><RotateCcw size={16} /> Reanudar</button>}</div>;
 }
 
+function readinessAdvice(name: string) {
+  const advice: Record<string, string> = {
+    "model-endpoint": "Inicia el servidor de modelo local y confirma que responde.",
+    "model-identity": "El modelo configurado no está disponible; verifica el nombre configurado.",
+    "faster-whisper-model": "Instala o descarga el modelo de transcripción configurado.",
+    ffmpeg: "Instala ffmpeg y ffprobe, luego vuelve a comprobar.",
+    "output-permissions": "Elige una carpeta de destino local con permisos de escritura.",
+    "chromium-pdf": "Instala un navegador Chromium compatible para exportar PDF.",
+    "free-disk-space": "Libera espacio local antes de procesar la reunión.",
+    configuration: "Corrige la configuración local y vuelve a comprobar.",
+  };
+  return advice[name] || "Corrige este requisito local y vuelve a comprobar.";
+}
+
+export function ReadinessPanel({
+  readiness,
+  busy,
+  recheck,
+}: {
+  readiness: api.Readiness;
+  busy: boolean;
+  recheck: () => void;
+}) {
+  if (readiness.ok) return null;
+  return <div className="error-banner readiness-panel"><AlertCircle size={18} /><div><strong>Antes de subir audio</strong>{readiness.checks.filter((check) => !check.ok).map((check) => <span key={check.name}><b>{check.name}:</b> {readinessAdvice(check.name)} {check.detail}</span>)}</div><button type="button" className="secondary-button" disabled={busy} onClick={recheck}><RefreshCw size={16} /> Volver a comprobar</button></div>;
+
+}
+
 function App() {
   const [boot, setBoot] = useState<api.Bootstrap | null>(null);
   const [items, setItems] = useState<api.MeetingSummary[]>([]);
@@ -97,6 +125,18 @@ function App() {
 
   const current = useMemo(() => items.find((item) => item.date === selected), [items, selected]);
   const selectedAudio = capture.file || audio;
+
+  async function recheckReadiness() {
+    setBusy(true); setError(""); setNotice("Comprobando requisitos locales…");
+    try {
+      const next = await api.bootstrap();
+      setBoot(next);
+      await refresh();
+      setNotice(next.readiness.ok ? "El entorno local está listo para procesar audio." : "Aún hay requisitos locales pendientes.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "No se pudo comprobar el entorno local");
+    } finally { setBusy(false); }
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -180,6 +220,7 @@ function App() {
               </section>
 
               <form className="capture-card" onSubmit={submit}>
+                {boot && <ReadinessPanel readiness={boot.readiness} busy={busy} recheck={recheckReadiness} />}
                 <div className="card-title"><div><span className="step">01</span><h2>Fuente de audio</h2></div><span className="accepted-formats">M4A · WAV · MP3 · MP4 · WEBM · OGG</span></div>
                 <div className={`recorder ${capture.recording ? "is-recording" : ""}`}>
                   <div className="record-visual">
@@ -203,7 +244,7 @@ function App() {
                   <label><span>Fecha</span><div className="input-wrap"><CalendarDays size={16} /><input type="date" value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} required /></div></label>
                   <label><span>Acta anterior <em>opcional</em></span><div className="input-wrap file-compact"><FileText size={16} /><input type="file" accept="application/pdf,.pdf" onChange={(e) => setPrevious(e.target.files?.[0] || null)} /></div></label>
                 </div>
-                <button className="primary-button" disabled={!selectedAudio || busy}>{busy ? <LoaderCircle className="spin" size={18} /> : <Sparkles size={18} />}{busy ? "Preparando…" : "Crear borrador de acta"}</button>
+                <button className="primary-button" disabled={!selectedAudio || busy || !boot?.readiness.ok}>{busy ? <LoaderCircle className="spin" size={18} /> : <Sparkles size={18} />}{busy ? "Preparando…" : "Crear borrador de acta"}</button>
                 {capture.error && <p className="inline-error"><AlertCircle size={15} /> {capture.error}</p>}
                 {capture.warning && <p className="inline-error"><AlertCircle size={15} /> {capture.warning}</p>}
               </form>
