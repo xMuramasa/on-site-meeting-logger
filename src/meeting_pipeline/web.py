@@ -167,6 +167,13 @@ def _artifact_records(path: Path) -> list[dict[str, str | bool]]:
     return records
 
 
+def _approves_final(path: Path) -> bool:
+    try:
+        return load_review(path / "review.yaml").approve_for_final_render
+    except PipelineError:
+        return False
+
+
 def _safe_date(value: str) -> date:
     try:
         parsed = date.fromisoformat(value)
@@ -419,7 +426,12 @@ def create_app(
     @app.post("/api/meetings/{meeting_date}/restart", status_code=202)
     def restart(meeting_date: str, background: BackgroundTasks) -> dict[str, str]:
         path = meeting_path(meeting_date)
-        manifest = load_manifest(path / "manifest.json")
+        try:
+            manifest = load_manifest(path / "manifest.json")
+        except PipelineError as exc:
+            raise HTTPException(
+                status_code=409, detail="this meeting has no processing state to resume"
+            ) from exc
         if any(
             state.status == "failed" and state.error_code == "NO_SPEECH"
             for state in manifest.stages.values()
@@ -428,11 +440,9 @@ def create_app(
                 status_code=409, detail="upload audio with audible speech before retrying"
             )
         clear_cancellation(path)
-        finalization_started = any(
-            name in {"approve", "render", "export_pdf", "validate"}
-            for name in manifest.stages
-        )
-        until = "validate" if finalization_started else "generate_review"
+        # Resuming finalization without a currently approved review would only fail at `approve`.
+        finalization_started = any(name in FINALIZATION_STAGES for name in manifest.stages)
+        until = "validate" if finalization_started and _approves_final(path) else "generate_review"
         background.add_task(start_job, path, until)
         return {"date": meeting_date, "status": "accepted"}
 

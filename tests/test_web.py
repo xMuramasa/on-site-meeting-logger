@@ -452,3 +452,62 @@ def test_meeting_artifacts_are_manifest_backed_and_final_only_after_validation(t
     report.unlink()
     stale_detail = client(tmp_path).get("/api/meetings/2026-09-03").json()
     assert not any(artifact["final"] for artifact in stale_detail["artifacts"])
+
+
+def test_restart_refuses_a_legacy_directory_without_processing_state(tmp_path):
+    meeting = tmp_path / "meetings" / "2026-09-03"
+    meeting.mkdir(parents=True)
+    (meeting / "review.yaml").write_text("approve_for_final_render: false\n")
+    api = client(tmp_path)
+    headers = {"origin": "http://127.0.0.1:8765", "x-csrf-token": "test-csrf-token"}
+
+    response = api.post("/api/meetings/2026-09-03/restart", headers=headers)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "this meeting has no processing state to resume"
+
+
+def test_restart_does_not_refinalize_a_meeting_whose_review_is_unapproved(tmp_path):
+    meeting = tmp_path / "meetings" / "2026-09-03"
+    source = meeting / "source" / "meeting.webm"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"audio")
+    manifest = PipelineManifest.model_validate(
+        {
+            "pipeline_version": "test",
+            "meeting_dir": str(meeting),
+            "meeting_date": "2026-09-03",
+            "created_at": "2026-09-03T00:00:00Z",
+            "updated_at": "2026-09-03T00:00:00Z",
+            "source_filename": "meeting.webm",
+            "source_sha256": "a" * 64,
+        }
+    )
+    for stage in ("generate_review", "approve", "render", "export_pdf", "validate"):
+        complete_stage(manifest, stage, stage, {})
+    write_manifest(meeting / "manifest.json", manifest)
+    calls = []
+    api = client(tmp_path, runner=lambda path, **kwargs: calls.append((Path(path), kwargs["until"])))
+    headers = {"origin": "http://127.0.0.1:8765", "x-csrf-token": "test-csrf-token"}
+    unapproved = {
+        "participants": [],
+        "proper_nouns": {},
+        "owners": {},
+        "relative_date_actions": [],
+        "quality_warnings": [],
+        "approve_for_final_render": False,
+    }
+    assert api.put(
+        "/api/meetings/2026-09-03/review", headers=headers, json=unapproved
+    ).status_code == 200
+    assert api.post("/api/meetings/2026-09-03/finalize", headers=headers).status_code == 409
+
+    assert api.post("/api/meetings/2026-09-03/restart", headers=headers).status_code == 202
+    assert calls == [(meeting, "generate_review")]
+
+    approved = {**unapproved, "approve_for_final_render": True}
+    assert api.put(
+        "/api/meetings/2026-09-03/review", headers=headers, json=approved
+    ).status_code == 200
+    assert api.post("/api/meetings/2026-09-03/restart", headers=headers).status_code == 202
+    assert calls[-1] == (meeting, "validate")
