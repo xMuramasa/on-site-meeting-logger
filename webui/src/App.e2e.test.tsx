@@ -27,6 +27,7 @@ const bootstrap: Bootstrap = {
   output_root: "/tmp/meetings",
   accepted_audio: ["webm"],
   recording_supported: true,
+  readiness: { ok: true, checks: [] },
 };
 
 const review: Review = {
@@ -54,8 +55,9 @@ const summary = (overrides: Partial<MeetingSummary> = {}): MeetingSummary => ({
 const detail = (overrides: Partial<MeetingDetail> = {}): MeetingDetail => ({
   date: "2026-09-03",
   job: null,
+  audio_analysis: null,
   review,
-  files: [],
+  artifacts: [],
   ...overrides,
 });
 
@@ -103,6 +105,8 @@ function button(label: string) {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:preview") });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
   vi.clearAllMocks();
   mocks.bootstrap.mockResolvedValue(bootstrap);
   mocks.meetings.mockResolvedValue([]);
@@ -217,28 +221,33 @@ describe("Meeting Studio browser workflows", () => {
   });
 
   it("offers restart recovery for failed durable jobs", async () => {
-    mocks.meetings.mockResolvedValue([summary({ job: { status: "failed", stage: "transcribe", error: "worker stopped" } })]);
-    mocks.meeting.mockResolvedValue(detail({ job: { status: "failed", stage: "transcribe", error: "worker stopped" }, review: null }));
+    mocks.meetings.mockResolvedValue([summary({ job: { status: "failed", stage: "transcribe", error_code: "PROCESSING_FAILED", retryable: true } })]);
+    mocks.meeting.mockResolvedValue(detail({ job: { status: "failed", stage: "transcribe", error_code: "PROCESSING_FAILED", retryable: true }, review: null }));
     await renderApp();
 
     await click(button("3 sept"));
     await click(button("Reanudar"));
 
-    expect(container.textContent).toContain("worker stopped");
+    expect(container.textContent).toContain("PROCESSING_FAILED");
     expect(mocks.restart).toHaveBeenCalledWith("2026-09-03");
   });
 
   it("exposes final document downloads with meeting-scoped links", async () => {
     mocks.meetings.mockResolvedValue([summary({ stages: { validate: "complete" } })]);
-    mocks.meeting.mockResolvedValue(detail({ files: ["acta-final.pdf", "acta-final.html", "review.yaml"] }));
+    mocks.meeting.mockResolvedValue(detail({ artifacts: [
+      { name: "acta-final.pdf", role: "minutes", format: "PDF", final: true },
+      { name: "acta-final.html", role: "minutes", format: "HTML", final: true },
+      { name: "review.yaml", role: "supporting", format: "YAML", final: false },
+    ] }));
     await renderApp();
     await click(button("3 sept"));
 
     const links = [...container.querySelectorAll(".output-grid a")];
-    expect(links).toHaveLength(2);
+    expect(links).toHaveLength(3);
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
       "/api/meetings/2026-09-03/files/acta-final.pdf",
       "/api/meetings/2026-09-03/files/acta-final.html",
+      "/api/meetings/2026-09-03/files/review.yaml",
     ]);
   });
 });
