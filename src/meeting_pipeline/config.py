@@ -100,6 +100,10 @@ class ValidationSettings(_Base):
     require_text_layer: bool = True
     min_text_chars: int = Field(default=800, ge=0)
     max_trailing_page_chars: int = Field(default=120, ge=0)
+    require_visual_validation: bool = True
+    visual_dpi: int = Field(default=96, ge=36, le=300)
+    max_trailing_page_ink_ratio: float = Field(default=0.01, ge=0.0, le=1.0)
+    max_visual_overlap_count: int = Field(default=0, ge=0)
     required_phrases: list[str] = Field(default_factory=list)
 
 

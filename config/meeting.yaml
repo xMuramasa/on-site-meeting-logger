@@ -67,6 +67,10 @@ validation:
   require_text_layer: true
   min_text_chars: 800
   max_trailing_page_chars: 120
+  require_visual_validation: true
+  visual_dpi: 96
+  max_trailing_page_ink_ratio: 0.01
+  max_visual_overlap_count: 0
   required_phrases:
     - ACTA DE REUNIÓN
     - Participantes
