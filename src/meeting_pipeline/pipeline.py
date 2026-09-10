@@ -19,7 +19,6 @@ from .errors import (
     PipelineCancelled,
     PipelineError,
 )
-
 from .manifest import (
     cancel_stage,
     complete_stage,
@@ -33,7 +32,7 @@ from .manifest import (
     write_json_atomic,
     write_manifest,
 )
-from .models import AudioLevelAnalysis, AudioMetadata, CanonicalActa, Transcript
+from .models import AudioLevelAnalysis, AudioMetadata, CanonicalActa, StageState, Transcript
 from .pdf import export_pdf
 from .previous_context import extract_previous_context
 from .providers.openai_compatible import OpenAICompatibleProvider
@@ -81,6 +80,14 @@ def failure_diagnostic(exc: Exception) -> FailureDiagnostic:
     if isinstance(exc, OSError):
         return FailureDiagnostic("STORAGE_UNAVAILABLE", True)
     return FailureDiagnostic("PROCESSING_FAILED", True)
+
+
+def invalidate_stages_from(manifest: Any, stage: str, *, include: bool = True) -> None:
+    """Mark a stage range stale while retaining old files for safe regeneration."""
+    start = STAGES.index(stage) + (0 if include else 1)
+    for name in STAGES[start:]:
+        if name in manifest.stages:
+            manifest.stages[name] = StageState()
 
 
 def _read_model(path: Path, model_type: type[Any]) -> Any:
@@ -132,6 +139,7 @@ def _run_stages(
         write_manifest(manifest_path, manifest)
 
     def begin(stage: str) -> None:
+        invalidate_stages_from(manifest, stage, include=False)
         start_stage(manifest, stage)
         write_manifest(manifest_path, manifest)
         if (build / ".cancel-requested").is_file():
@@ -154,7 +162,10 @@ def _run_stages(
                 analysis_path = build / "audio-levels.json"
                 write_json_atomic(analysis_path, analysis.model_dump(mode="json"))
                 artifacts["levels"] = analysis_path
-                if analysis.classification == "silent":
+                if (
+                    analysis.classification == "silent"
+                    and analysis.scanned_seconds >= metadata.duration_seconds
+                ):
                     raise NoSpeechError(
                         "No se detectó audio audible. Verifica que la grabación use el micrófono "
                         "correcto o incluya el audio del sistema y vuelve a intentarlo."

@@ -20,7 +20,12 @@ from .errors import PipelineError
 from .ingest import SUPPORTED_AUDIO, ingest_meeting
 from .manifest import fail_stage, load_manifest, meeting_lock, write_manifest, write_text_atomic
 from .models import AudioLevelAnalysis, ReviewState
-from .pipeline import clear_cancellation, request_cancellation, run_stages
+from .pipeline import (
+    clear_cancellation,
+    invalidate_stages_from,
+    request_cancellation,
+    run_stages,
+)
 from .readiness import ReadinessCheck, ReadinessReport, check_readiness
 from .review import load_review
 
@@ -381,7 +386,16 @@ def create_app(
         serialized = yaml.safe_dump(
             review.model_dump(mode="json"), allow_unicode=True, sort_keys=False
         )
-        write_text_atomic(path / "review.yaml", serialized)
+        try:
+            with meeting_lock(path):
+                write_text_atomic(path / "review.yaml", serialized)
+                manifest_path = path / "manifest.json"
+                if manifest_path.is_file():
+                    manifest = load_manifest(manifest_path)
+                    invalidate_stages_from(manifest, "approve")
+                    write_manifest(manifest_path, manifest)
+        except PipelineError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"saved": True}
 
     @app.post("/api/meetings/{meeting_date}/finalize", status_code=202)

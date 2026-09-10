@@ -433,6 +433,22 @@ def test_meeting_artifacts_are_manifest_backed_and_final_only_after_validation(t
     assert [artifact["final"] for artifact in final_detail["artifacts"]] == [False, False, True, True, True, False]
     assert client(tmp_path).get("/api/meetings/2026-09-03/files/renamed-minutes.pdf").status_code == 200
 
+    changed_review = {
+        "participants": [],
+        "proper_nouns": {"antes": "después"},
+        "owners": {},
+        "relative_date_actions": [],
+        "quality_warnings": [],
+        "approve_for_final_render": False,
+    }
+    headers = {"origin": "http://127.0.0.1:8765", "x-csrf-token": "test-csrf-token"}
+    assert client(tmp_path).put(
+        "/api/meetings/2026-09-03/review", headers=headers, json=changed_review
+    ).status_code == 200
+    edited_detail = client(tmp_path).get("/api/meetings/2026-09-03").json()
+    assert not any(artifact["final"] for artifact in edited_detail["artifacts"])
+    assert not any(artifact["role"] == "minutes" for artifact in edited_detail["artifacts"])
+
     report.unlink()
     stale_detail = client(tmp_path).get("/api/meetings/2026-09-03").json()
-    assert [artifact["final"] for artifact in stale_detail["artifacts"]] == [False] * 6
+    assert not any(artifact["final"] for artifact in stale_detail["artifacts"])

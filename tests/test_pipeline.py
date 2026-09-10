@@ -8,7 +8,7 @@ import yaml
 
 from meeting_pipeline.errors import AudioDecodeError, ModelUnavailableError, NoSpeechError
 from meeting_pipeline.ingest import ingest_meeting
-from meeting_pipeline.manifest import load_manifest
+from meeting_pipeline.manifest import complete_stage, load_manifest, write_manifest
 from meeting_pipeline.models import AudioLevelAnalysis, AudioMetadata, CanonicalActa
 from meeting_pipeline.pipeline import failure_diagnostic, run_stages
 from meeting_pipeline.reasoning import ChunkExtraction
@@ -78,6 +78,12 @@ def silent_analysis(_path):
     )
 
 
+def short_probe(path):
+    metadata = fake_probe(path)
+    metadata.duration_seconds = 60.0
+    return metadata
+
+
 def test_pipeline_rejects_silence_before_transcription_and_keeps_source(tmp_path):
     audio = tmp_path / "input.m4a"
     audio.write_bytes(b"original recording")
@@ -88,13 +94,59 @@ def test_pipeline_rejects_silence_before_transcription_and_keeps_source(tmp_path
             meeting_dir,
             until="transcribe",
             transcription_model=FakeWhisper(),
-            audio_probe=fake_probe,
+            audio_probe=short_probe,
             audio_level_inspector=silent_analysis,
         )
 
     assert (meeting_dir / "source" / "meeting.m4a").read_bytes() == b"original recording"
     manifest = load_manifest(meeting_dir / "manifest.json")
     assert manifest.stages["inspect"].status == "failed"
+
+
+def test_pipeline_does_not_reject_long_recording_from_silent_opening_sample(tmp_path):
+    audio = tmp_path / "input.m4a"
+    audio.write_bytes(b"original recording")
+    meeting_dir = ingest_meeting(audio, None, date(2026, 8, 31), tmp_path / "out")
+
+    run_stages(
+        meeting_dir,
+        until="transcribe",
+        transcription_model=FakeWhisper(),
+        audio_probe=fake_probe,
+        audio_level_inspector=silent_analysis,
+    )
+
+    assert (meeting_dir / "build" / "transcript.json").is_file()
+    manifest = load_manifest(meeting_dir / "manifest.json")
+    assert manifest.stages["inspect"].status == "complete"
+    assert manifest.stages["transcribe"].status == "complete"
+
+
+def test_failed_upstream_rerun_invalidates_completed_downstream_outputs(tmp_path):
+    audio = tmp_path / "input.m4a"
+    audio.write_bytes(b"original recording")
+    meeting_dir = ingest_meeting(audio, None, date(2026, 8, 31), tmp_path / "out")
+    manifest_path = meeting_dir / "manifest.json"
+    manifest = load_manifest(manifest_path)
+    old_output = meeting_dir / "old-minutes.pdf"
+    old_output.write_bytes(b"old")
+    complete_stage(manifest, "inspect", "stale", {"metadata": old_output})
+    complete_stage(manifest, "render", "old-render", {"markdown": old_output})
+    complete_stage(manifest, "export_pdf", "old-pdf", {"pdf": old_output})
+    complete_stage(manifest, "validate", "old-validation", {"report": old_output})
+    write_manifest(manifest_path, manifest)
+
+    def broken_probe(_path):
+        raise RuntimeError("inspection failed")
+
+    with pytest.raises(RuntimeError, match="inspection failed"):
+        run_stages(meeting_dir, until="inspect", audio_probe=broken_probe)
+
+    stages = load_manifest(manifest_path).stages
+    assert stages["inspect"].status == "failed"
+    assert stages["render"].status == "pending"
+    assert stages["export_pdf"].status == "pending"
+    assert stages["validate"].status == "pending"
 
 
 def test_pipeline_runs_to_review_then_approved_render(tmp_path):
