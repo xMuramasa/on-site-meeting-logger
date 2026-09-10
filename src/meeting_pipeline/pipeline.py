@@ -216,26 +216,30 @@ def _run_stages(
     if until == stage:
         return PipelineResult(meeting_dir, stage, _all_artifacts(manifest))
 
-    # previous context (a sentinel is still an artifact when no PDF was supplied)
+    # Previous context (a sentinel is still an artifact when none was supplied).
     stage = "extract_previous_context"
     context_path = build / "previous-context.json"
     context_fp = fingerprint(
-        "previous-context-v1",
+        "previous-context-v2",
         manifest.previous_acta_sha256,
         settings.glossary.model_dump(mode="json"),
         [item.model_dump(mode="json") for item in settings.reference_participants],
     )
     if not stage_is_current(manifest, stage, context_fp):
         begin(stage)
-        prior_path = meeting_dir / "source" / "previous-acta.pdf"
+        previous_suffix = Path(manifest.previous_acta_filename or "").suffix.lower()
+        prior_path = meeting_dir / "source" / f"previous-acta{previous_suffix}"
         if manifest.previous_acta_sha256:
             context = extract_previous_context(prior_path, settings)
         else:
             context = {
                 "source": None,
                 "sha256": None,
+                "format": None,
+                "date": None,
                 "page_count": 0,
                 "text": "No se proporcionó acta anterior.",
+                "canonical_acta": None,
                 "participants": [],
                 "canonical_terms_found": [],
                 "provenance": "none",
@@ -270,7 +274,10 @@ def _run_stages(
             "recording_sha256": manifest.source_sha256,
             "previous_acta_filename": manifest.previous_acta_filename,
             "previous_acta_sha256": manifest.previous_acta_sha256,
-            "previous_acta_date": None,
+            "previous_acta_format": manifest.previous_acta_format,
+            "previous_acta_date": manifest.previous_acta_date.isoformat()
+            if manifest.previous_acta_date
+            else None,
         }
         acta, extractions = generate_acta_draft(
             transcript,

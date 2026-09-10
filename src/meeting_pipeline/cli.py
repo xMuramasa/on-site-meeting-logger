@@ -22,7 +22,11 @@ app = typer.Typer(
 )
 
 AudioOpt = typer.Option(..., "--audio", help="Source recording (.m4a/.wav/.mp3).")
-PreviousOpt = typer.Option(None, "--previous-acta", help="Previous acta PDF (context only).")
+PreviousOpt = typer.Option(
+    None,
+    "--previous-acta",
+    help="Previous acta PDF, Markdown, HTML, or canonical JSON (context only).",
+)
 DateOpt = typer.Option(None, "--date", help="Meeting date (YYYY-MM-DD). Defaults to today.")
 OutRootOpt = typer.Option(
     None,
@@ -119,7 +123,7 @@ def extract_context(
     config: Path | None = ConfigOpt,
     force: bool = ForceOpt,
 ) -> None:
-    """Extract provenance-labelled context from the previous acta PDF."""
+    """Extract provenance-labelled context from the previous acta source."""
     from .pipeline import run_stages
 
     try:

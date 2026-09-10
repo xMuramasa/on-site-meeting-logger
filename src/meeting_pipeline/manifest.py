@@ -57,6 +57,8 @@ def create_manifest(
     meeting_date: date,
     source: Path,
     previous_acta: Path | None,
+    previous_acta_format: str | None = None,
+    previous_acta_date: date | None = None,
 ) -> PipelineManifest:
     now = datetime.now(UTC)
     return PipelineManifest(
@@ -69,6 +71,8 @@ def create_manifest(
         source_sha256=sha256_file(source),
         previous_acta_filename=previous_acta.name if previous_acta else None,
         previous_acta_sha256=sha256_file(previous_acta) if previous_acta else None,
+        previous_acta_format=previous_acta_format,
+        previous_acta_date=previous_acta_date,
     )
 
 

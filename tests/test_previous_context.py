@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import yaml
 
 from meeting_pipeline.config import load_config
@@ -49,3 +51,32 @@ def test_empty_pdf_requires_ocr(tmp_path, monkeypatch):
     monkeypatch.setattr("meeting_pipeline.previous_context._extract_pages", lambda path: [""])
     with pytest.raises(PreviousContextError, match="OCR"):
         extract_previous_context(pdf, load_config(None))
+
+
+def test_extract_previous_context_accepts_markdown_and_html(tmp_path):
+    markdown = tmp_path / "prior.md"
+    markdown.write_text("# Acuerdos\n\nAlex realizará el seguimiento.", encoding="utf-8")
+    html = tmp_path / "prior.html"
+    html.write_text("<h1>Acuerdos</h1><p>Alex realizará el seguimiento.</p>", encoding="utf-8")
+
+    for prior, source_format in ((markdown, "text/markdown"), (html, "text/html")):
+        result = extract_previous_context(prior, load_config(None))
+        assert result["source"] == str(prior.resolve())
+        assert result["sha256"]
+        assert result["format"] == source_format
+        assert result["date"] is None
+        assert "Alex realizará el seguimiento." in result["text"]
+        assert result["provenance"] == "previous_acta"
+
+
+def test_extract_previous_context_prefers_canonical_json_metadata(tmp_path):
+    fixture = Path(__file__).parent / "fixtures" / "valid-acta.json"
+    prior = tmp_path / "prior.json"
+    prior.write_text(fixture.read_text(encoding="utf-8"), encoding="utf-8")
+
+    result = extract_previous_context(prior, load_config(None))
+
+    assert result["format"] == "application/json"
+    assert result["date"] == "2026-08-31"
+    assert result["canonical_acta"]["meeting"]["title"] == "Reunión semanal"
+    assert result["provenance"] == "previous_acta"

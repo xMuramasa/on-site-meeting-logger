@@ -1,4 +1,5 @@
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -22,6 +23,33 @@ def test_ingest_creates_immutable_sources_and_manifest(tmp_path):
     assert manifest.source_sha256 == sha256_file(audio)
     assert manifest.previous_acta_sha256 == sha256_file(prior)
     assert (meeting_dir / "build").is_dir()
+
+
+@pytest.mark.parametrize(
+    ("suffix", "content_type"),
+    [
+        (".md", "text/markdown"),
+        (".html", "text/html"),
+        (".json", "application/json"),
+    ],
+)
+def test_ingest_preserves_previous_acta_identity_hash_and_format(tmp_path, suffix, content_type):
+    audio = tmp_path / "input.m4a"
+    audio.write_bytes(b"audio-data")
+    prior = tmp_path / f"prior{suffix}"
+    if suffix == ".json":
+        fixture = Path(__file__).parent / "fixtures" / "valid-acta.json"
+        prior.write_text(fixture.read_text(encoding="utf-8"), encoding="utf-8")
+    else:
+        prior.write_text("Prior acta", encoding="utf-8")
+
+    meeting_dir = ingest_meeting(audio, prior, date(2026, 9, 7), tmp_path / "out")
+
+    manifest = load_manifest(meeting_dir / "manifest.json")
+    assert manifest.previous_acta_filename == prior.name
+    assert manifest.previous_acta_sha256 == sha256_file(prior)
+    assert manifest.previous_acta_format == content_type
+    assert (meeting_dir / "source" / f"previous-acta{suffix}").read_bytes() == prior.read_bytes()
 
 
 def test_ingest_resumes_when_source_is_identical(tmp_path):

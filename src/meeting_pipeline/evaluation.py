@@ -150,7 +150,10 @@ def evaluate_reviewed_meeting(
             "recording_sha256": manifest.source_sha256,
             "previous_acta_filename": manifest.previous_acta_filename,
             "previous_acta_sha256": manifest.previous_acta_sha256,
-            "previous_acta_date": None,
+            "previous_acta_format": manifest.previous_acta_format,
+            "previous_acta_date": manifest.previous_acta_date.isoformat()
+            if manifest.previous_acta_date
+            else None,
         },
     )
     runtime_seconds = time.perf_counter() - started

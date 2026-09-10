@@ -8,6 +8,11 @@ from pathlib import Path
 
 from .errors import IngestError
 from .manifest import create_manifest, load_manifest, sha256_file, write_manifest
+from .previous_context import (
+    SUPPORTED_PREVIOUS_ACTA,
+    canonical_acta_from_json,
+    previous_acta_format,
+)
 
 SUPPORTED_AUDIO = {".m4a", ".wav", ".mp3", ".mp4", ".webm", ".ogg"}
 
@@ -45,8 +50,19 @@ def ingest_meeting(
             f"unsupported audio format {audio.suffix!r}; use m4a, wav, mp3, mp4, webm, or ogg"
         )
     prior = Path(previous_acta).expanduser().resolve() if previous_acta else None
-    if prior is not None and (not prior.is_file() or prior.suffix.lower() != ".pdf"):
-        raise IngestError(f"previous acta must be an existing PDF: {prior}")
+    if prior is not None and not prior.is_file():
+        raise IngestError(f"previous acta not found: {prior}")
+    try:
+        prior_format = previous_acta_format(prior) if prior else None
+        if prior_format == "application/json":
+            assert prior is not None
+            prior_date = canonical_acta_from_json(prior).meeting.date
+        else:
+            prior_date = None
+    except Exception as exc:
+        formats = ", ".join(suffix.removeprefix(".") for suffix in SUPPORTED_PREVIOUS_ACTA)
+        message = f"previous acta must be an existing {formats} file: {prior}: {exc}"
+        raise IngestError(message) from exc
 
     if output_root is None:
         root = (
@@ -61,7 +77,7 @@ def ingest_meeting(
 
     copied_audio = source_dir / f"meeting{audio.suffix.lower()}"
     _copy_immutable(audio, copied_audio)
-    copied_prior = source_dir / "previous-acta.pdf" if prior else None
+    copied_prior = source_dir / f"previous-acta{prior.suffix.lower()}" if prior else None
     if prior and copied_prior:
         _copy_immutable(prior, copied_prior)
 
@@ -73,7 +89,23 @@ def ingest_meeting(
         expected_prior = sha256_file(copied_prior) if copied_prior else None
         if manifest.previous_acta_sha256 != expected_prior:
             raise IngestError(f"manifest describes a different previous acta: {meeting_dir}")
+        if manifest.previous_acta_format is None and manifest.previous_acta_date is None:
+            manifest.previous_acta_format = prior_format
+            manifest.previous_acta_date = prior_date
+            write_manifest(manifest_path, manifest)
+        elif (
+            manifest.previous_acta_format != prior_format
+            or manifest.previous_acta_date != prior_date
+        ):
+            raise IngestError(f"manifest describes different previous acta metadata: {meeting_dir}")
     else:
-        manifest = create_manifest(meeting_dir, meeting_date, copied_audio, copied_prior)
+        manifest = create_manifest(
+            meeting_dir,
+            meeting_date,
+            copied_audio,
+            prior,
+            previous_acta_format=prior_format,
+            previous_acta_date=prior_date,
+        )
         write_manifest(manifest_path, manifest)
     return meeting_dir

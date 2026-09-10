@@ -26,6 +26,7 @@ from .pipeline import (
     request_cancellation,
     run_stages,
 )
+from .previous_context import SUPPORTED_PREVIOUS_ACTA
 from .readiness import ReadinessCheck, ReadinessReport, check_readiness
 from .review import load_review
 
@@ -352,7 +353,7 @@ def create_app(
             previous_path = None
             if previous_acta is not None and previous_acta.filename:
                 previous_path = await _save_upload(
-                    previous_acta, request_dir / "previous-acta", {".pdf"}
+                    previous_acta, request_dir / "previous-acta", set(SUPPORTED_PREVIOUS_ACTA)
                 )
             meeting_dir = ingest_meeting(audio_path, previous_path, parsed, output_root=root)
         except PipelineError as exc:

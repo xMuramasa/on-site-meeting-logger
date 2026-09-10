@@ -317,6 +317,7 @@ class MeetingMetadata(Strict):
     recording_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     previous_acta_filename: str | None = None
     previous_acta_sha256: str | None = None
+    previous_acta_format: str | None = None
     previous_acta_date: Date | None = None
 
     def long_date(self) -> str:
@@ -467,6 +468,8 @@ class PipelineManifest(Strict):
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     previous_acta_filename: str | None = None
     previous_acta_sha256: str | None = None
+    previous_acta_format: str | None = None
+    previous_acta_date: Date | None = None
     config_fingerprint: str | None = None
     stages: dict[str, StageState] = Field(default_factory=dict)
     review_changes: list[str] = Field(default_factory=list)
