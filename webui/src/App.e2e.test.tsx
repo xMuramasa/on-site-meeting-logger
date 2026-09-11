@@ -122,6 +122,13 @@ beforeEach(() => {
     level: 0,
     file: null,
     error: "",
+    warning: "",
+    inputs: [],
+    selectedInputId: "default",
+    inputError: "",
+    inputSupported: true,
+    inputLabelsAvailable: true,
+    selectInput: vi.fn(),
     start: vi.fn(),
     stop: vi.fn(),
     discard: vi.fn(),
@@ -195,6 +202,36 @@ describe("Meeting Studio browser workflows", () => {
     expect(container.textContent).toContain("Grabando reunión");
     expect(container.textContent).toContain("Detén la grabación antes de crear el borrador.");
     expect(button("Crear borrador de acta")).toHaveProperty("disabled", true);
+  });
+
+  it("lets the user choose a named microphone before recording without starting capture", async () => {
+    const selectInput = vi.fn();
+    mocks.useRecorder.mockReturnValue({
+      recording: false, elapsed: 0, level: 0, file: null, error: "", warning: "",
+      inputs: [{ deviceId: "default", label: "Micrófono integrado" }, { deviceId: "usb-mic", label: "Micrófono USB" }],
+      selectedInputId: "default", inputError: "", inputSupported: true, inputLabelsAvailable: true,
+      selectInput, start: vi.fn(), stop: vi.fn(), discard: vi.fn(),
+    });
+    await renderApp();
+
+    const input = container.querySelector('select[aria-label="Entrada de micrófono"]') as HTMLSelectElement;
+    expect(input.value).toBe("default");
+    await setInput(input, "usb-mic");
+
+    expect(selectInput).toHaveBeenCalledWith("usb-mic");
+    expect(container.textContent).toContain("solo selecciona una entrada de audio");
+    expect(mocks.useRecorder.mock.results[0]?.value.start).not.toHaveBeenCalled();
+  });
+
+  it("shows why microphone names are unavailable before permission", async () => {
+    mocks.useRecorder.mockReturnValue({
+      recording: false, elapsed: 0, level: 0, file: null, error: "", warning: "",
+      inputs: [{ deviceId: "default", label: "" }], selectedInputId: "default", inputError: "", inputSupported: true, inputLabelsAvailable: false,
+      selectInput: vi.fn(), start: vi.fn(), stop: vi.fn(), discard: vi.fn(),
+    });
+    await renderApp();
+
+    expect(container.textContent).toContain("Los nombres de los micrófonos aparecerán después de permitir el acceso");
   });
 
   it("renders durable job progress and lets the user cancel processing", async () => {

@@ -152,6 +152,10 @@ function App() {
   }
 
   const current = useMemo(() => items.find((item) => item.date === selected), [items, selected]);
+  const audioInputs = capture.inputs || [];
+  const selectedInputId = capture.selectedInputId || "default";
+  const inputSupported = capture.inputSupported ?? true;
+  const inputLabelsAvailable = capture.inputLabelsAvailable ?? true;
   useEffect(() => {
     if (!capture.file) return;
     setSelectedAudio(capture.file);
@@ -272,7 +276,17 @@ function App() {
                   </div>
                   {audioSource === "recording" && selectedAudio && <button type="button" className="text-button" onClick={() => { capture.discard(); setSelectedAudio(null); setAudioSource(null); }}><RotateCcw size={14} /> Descartar</button>}
                 </div>
-                <p className="capture-help">El micrófono solo capta lo que oye el Mac. Para una llamada, selecciona una entrada que incluya el audio del sistema o sube la grabación de la plataforma.</p>
+                <div className="input-selector">
+                  <label htmlFor="microphone-input"><span>Entrada de micrófono</span><select id="microphone-input" aria-label="Entrada de micrófono" value={selectedInputId} disabled={capture.recording || !inputSupported} onChange={(event) => capture.selectInput(event.target.value)}>
+                    <option value="default">Entrada predeterminada del sistema</option>
+                    {audioInputs.filter((device) => device.deviceId !== "default").map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Micrófono ${index + 1}`}</option>)}
+                  </select></label>
+                  <small>{capture.recording ? "Detén la grabación antes de cambiar de micrófono." : "La entrada se usará cuando inicies la grabación."}</small>
+                </div>
+                {!inputSupported && <p className="inline-error"><AlertCircle size={15} /> Este navegador no permite enumerar ni usar entradas de micrófono.</p>}
+                {!inputLabelsAvailable && inputSupported && <p className="capture-help input-note">Los nombres de los micrófonos aparecerán después de permitir el acceso. Abrir el selector no solicita permiso.</p>}
+                {capture.inputError && <p className="inline-error"><AlertCircle size={15} /> {capture.inputError}</p>}
+                <p className="capture-help">Este selector solo selecciona una entrada de audio; no captura automáticamente el audio del sistema. Si instalaste un dispositivo loopback, podría aparecer aquí. Para una llamada, selecciona una entrada que incluya el audio del sistema o sube la grabación de la plataforma.</p>
                 <div className="or"><span>o selecciona archivos</span></div>
                 <label className="file-drop">
                   <input type="file" accept="audio/*,.m4a,.mp3,.wav,.mp4,.webm,.ogg" onChange={(event) => { const file = event.target.files?.[0]; if (!file) return; capture.discard(); setSelectedAudio(file); setAudioSource("upload"); }} />

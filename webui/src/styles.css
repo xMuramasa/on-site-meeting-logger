@@ -71,6 +71,11 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .meter { margin-left: auto; display: flex; align-items: center; gap: 3px; height: 30px; padding: 0 6px; }
 .meter i { width: 3px; min-height: 4px; max-height: 30px; background: var(--destructive); border-radius: 3px; transition: height .08s linear; }
 .text-button { border: 0; background: transparent; color: var(--foreground); font-size: 11px; display: flex; align-items: center; gap: 5px; }
+.input-selector { margin-top: 12px; display: grid; gap: 5px; }
+.input-selector label > span { display: block; margin: 0 0 6px 2px; color: var(--muted-foreground); font-size: 10px; font-weight: 700; letter-spacing: .55px; text-transform: uppercase; }
+.input-selector select { width: 100%; min-height: 40px; padding: 0 10px; color: var(--foreground); background: var(--background); border: 1px solid var(--border); border-radius: 7px; }
+.input-selector small, .input-note { color: var(--muted-foreground); font-size: 10px; }
+.input-note { margin: 8px 0 0; }
 .or { margin: 18px 0; display: flex; align-items: center; color: var(--muted-foreground); font-size: 10px; text-transform: uppercase; letter-spacing: .7px; }
 .or::before, .or::after { content: ""; height: 1px; background: var(--border); flex: 1; }
 .or span { padding: 0 11px; }

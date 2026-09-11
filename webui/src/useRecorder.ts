@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { audioWarning, recordingExtension } from "./lib";
 
+export type AudioInput = Pick<MediaDeviceInfo, "deviceId" | "label">;
+
 export function recorderErrorMessage(reason: unknown) {
   if (reason instanceof DOMException) {
     if (reason.name === "NotAllowedError" || reason.name === "SecurityError") {
@@ -20,6 +22,10 @@ export function useRecorder() {
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
+  const [inputs, setInputs] = useState<AudioInput[]>([]);
+  const [selectedInputId, setSelectedInputId] = useState("default");
+  const [inputError, setInputError] = useState("");
+  const [inputSupported, setInputSupported] = useState(true);
   const recorder = useRef<MediaRecorder | null>(null);
   const stream = useRef<MediaStream | null>(null);
   const audioContext = useRef<AudioContext | null>(null);
@@ -27,6 +33,26 @@ export function useRecorder() {
   const frame = useRef<number | null>(null);
   const peak = useRef(0);
   const session = useRef(0);
+
+  const refreshInputs = useCallback(async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      setInputSupported(false);
+      return;
+    }
+    try {
+      const nextInputs = (await navigator.mediaDevices.enumerateDevices())
+        .filter((device) => device.kind === "audioinput")
+        .map(({ deviceId, label }) => ({ deviceId, label }));
+      setInputs(nextInputs);
+      setSelectedInputId((current) => {
+        if (current === "default" || nextInputs.some((device) => device.deviceId === current)) return current;
+        setInputError("El micrófono seleccionado ya no está disponible. Se usará la entrada predeterminada del sistema.");
+        return "default";
+      });
+    } catch {
+      setInputError("No se pudieron actualizar los micrófonos disponibles.");
+    }
+  }, []);
 
   const cleanup = useCallback(() => {
     if (timer.current) window.clearInterval(timer.current);
@@ -46,6 +72,13 @@ export function useRecorder() {
     cleanup();
   }, [cleanup]);
 
+  useEffect(() => {
+    void refreshInputs();
+    if (!navigator.mediaDevices?.addEventListener) return;
+    navigator.mediaDevices.addEventListener("devicechange", refreshInputs);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", refreshInputs);
+  }, [refreshInputs]);
+
   const start = async () => {
     const currentSession = session.current + 1;
     session.current = currentSession;
@@ -56,8 +89,14 @@ export function useRecorder() {
     setFile(null);
     peak.current = 0;
     try {
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("Este navegador no permite grabar con micrófono.");
       const media = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          ...(selectedInputId === "default" ? {} : { deviceId: { exact: selectedInputId } }),
+        },
       });
       if (session.current !== currentSession) {
         media.getTracks().forEach((track) => track.stop());
@@ -126,5 +165,15 @@ export function useRecorder() {
     setError("");
     setWarning("");
   };
-  return { recording, elapsed, level, file, error, warning, start, stop, discard };
+  const selectInput = (deviceId: string) => {
+    if (recording) return;
+    setSelectedInputId(deviceId);
+    setInputError("");
+  };
+  return {
+    recording, elapsed, level, file, error, warning, start, stop, discard,
+    inputs, selectedInputId, inputError, inputSupported,
+    inputLabelsAvailable: inputs.some((device) => Boolean(device.label)),
+    selectInput,
+  };
 }
