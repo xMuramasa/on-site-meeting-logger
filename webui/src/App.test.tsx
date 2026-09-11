@@ -26,6 +26,7 @@ describe("ReviewForm", () => {
         review={review}
         update={() => undefined}
         busy={false}
+        dirty={false}
         save={() => undefined}
         finalize={() => undefined}
       />,

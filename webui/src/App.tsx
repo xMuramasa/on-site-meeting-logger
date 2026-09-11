@@ -56,6 +56,14 @@ function StatusDot({ state }: { state?: string }) {
   return <span className={`status-dot ${state === "complete" ? "done" : state === "failed" ? "failed" : ""}`} />;
 }
 
+function meetingStatus(item: api.MeetingSummary) {
+  if (item.stages.validate === "complete") return "Acta validada · lista para descargar";
+  if (item.job?.status === "running") return "Procesando · puedes cancelar";
+  if (item.job?.status === "failed") return "Falló · revisa y reanuda";
+  if (item.job?.status === "cancelled") return "Cancelada · puedes reanudar";
+  return "Revisión pendiente · confirma y guarda";
+}
+
 export function ProcessingFailure({ job, busy, restart }: { job: api.Job; busy: boolean; restart: () => void }) {
   const code = job.error_code || "PROCESSING_FAILED";
   const stage = STAGE_LABELS[job.stage] || job.stage;
@@ -102,16 +110,17 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [reviewDirty, setReviewDirty] = useState(false);
   const capture = useRecorder();
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (forceDetail = false) => {
     const next = await api.meetings();
     setItems(next);
-    if (selected) setDetail(await api.meeting(selected));
-  }, [selected]);
+    if (selected && (!reviewDirty || forceDetail)) setDetail(await api.meeting(selected));
+  }, [reviewDirty, selected]);
 
   useEffect(() => {
-    api.bootstrap().then(setBoot).then(refresh).catch((reason) => setError(reason.message));
+    api.bootstrap().then(setBoot).then(() => refresh()).catch((reason) => setError(reason.message));
   }, []); // bootstrap once
 
   useEffect(() => {
@@ -121,8 +130,26 @@ function App() {
 
   useEffect(() => {
     if (!selected) return;
-    api.meeting(selected).then(setDetail).catch((reason) => setError(reason.message));
-  }, [selected]);
+    if (!reviewDirty) api.meeting(selected).then(setDetail).catch((reason) => setError(reason.message));
+  }, [reviewDirty, selected]);
+
+  useEffect(() => {
+    if (!reviewDirty) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [reviewDirty]);
+
+  function selectMeeting(date: string | null) {
+    if (date === selected) return;
+    if (reviewDirty && !window.confirm("Tienes cambios sin guardar. ¿Quieres descartarlos y cambiar de reunión?")) return;
+    setReviewDirty(false);
+    setSelected(date);
+    if (date === null) setDetail(null);
+  }
 
   const current = useMemo(() => items.find((item) => item.date === selected), [items, selected]);
   useEffect(() => {
@@ -170,8 +197,9 @@ function App() {
     try {
       await api.saveReview(selected, detail.review);
       if (finalize) await api.finalize(selected);
-      setNotice(finalize ? "Finalización iniciada." : "Revisión guardada.");
-      await refresh();
+      setReviewDirty(false);
+      setNotice(finalize ? "Finalización iniciada. Los entregables se actualizarán cuando termine el proceso." : "Revisión guardada. Los entregables anteriores ya no están vigentes.");
+      await refresh(true);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "No se pudo guardar");
     } finally { setBusy(false); }
@@ -191,6 +219,7 @@ function App() {
 
   function updateReview(change: (review: api.Review) => api.Review) {
     setDetail((value) => value?.review ? { ...value, review: change(value.review) } : value);
+    setReviewDirty(true);
   }
 
   return (
@@ -206,16 +235,15 @@ function App() {
             <div><span className="eyebrow">ARCHIVO</span><h2>Reuniones</h2></div>
             <button className="icon-button" onClick={() => refresh()} aria-label="Actualizar"><RefreshCw size={16} /></button>
           </div>
-          <button className={`meeting-row ${selected === null ? "active" : ""}`} onClick={() => { setSelected(null); setDetail(null); }}>
+          <button className={`meeting-row ${selected === null ? "active" : ""}`} onClick={() => selectMeeting(null)}>
             <span className="new-icon"><Plus size={18} /></span><span><strong>Nueva reunión</strong><small>Subir o grabar audio</small></span>
           </button>
           <div className="meeting-list">
             {items.map((item) => {
               const complete = item.stages.validate === "complete";
-              const working = item.job?.status === "running";
-              return <button key={item.date} className={`meeting-row ${selected === item.date ? "active" : ""}`} onClick={() => setSelected(item.date)}>
+              return <button key={item.date} className={`meeting-row ${selected === item.date ? "active" : ""}`} onClick={() => selectMeeting(item.date)}>
                 <StatusDot state={complete ? "complete" : item.job?.status} />
-                <span><strong>{new Date(`${item.date}T12:00:00`).toLocaleDateString("es-CL", { day: "numeric", month: "short", year: "numeric" })}</strong><small>{working ? "Procesando…" : complete ? "Acta validada" : "Revisión pendiente"}</small></span>
+                <span><strong>{new Date(`${item.date}T12:00:00`).toLocaleDateString("es-CL", { day: "numeric", month: "short", year: "numeric" })}</strong><small>{meetingStatus(item)}</small></span>
                 <ChevronRight size={15} />
               </button>;
             })}
@@ -274,12 +302,12 @@ function App() {
                 {Object.entries(STAGE_LABELS).map(([key, label]) => <div className="stage" key={key}><StatusDot state={current?.stages[key]} /><span>{label}</span></div>)}
               </section>
 
-              {!detail?.review ? <section className="empty-review"><LoaderCircle className={detail?.job?.status === "running" ? "spin" : ""} size={28} /><h2>{detail?.job?.status === "running" ? "Construyendo borrador" : "La revisión aún no está disponible"}</h2><p>Esta vista se actualizará automáticamente.</p></section> : <ReviewForm review={detail.review} update={updateReview} busy={busy} save={() => persistReview(false)} finalize={() => persistReview(true)} />}
+              {!detail?.review ? <section className="empty-review" aria-live="polite"><LoaderCircle className={detail?.job?.status === "running" ? "spin" : ""} size={28} /><h2>{detail?.job?.status === "running" ? "Construyendo borrador" : "La revisión aún no está disponible"}</h2><p>{detail?.job?.status === "cancelled" ? "Reanuda el procesamiento para volver a generar el borrador." : "Esta vista se actualizará automáticamente."}</p></section> : <ReviewForm review={detail.review} update={updateReview} busy={busy} dirty={reviewDirty} save={() => persistReview(false)} finalize={() => persistReview(true)} />}
 
               {!!detail?.artifacts.length && <Deliverables meetingDate={selected} artifacts={detail.artifacts} />}
             </div>
           )}
-          {(notice || error) && <div className={`toast ${error ? "error" : ""}`}>{error ? <AlertCircle size={17} /> : <Check size={17} />}<span>{error || notice}</span><button onClick={() => { setError(""); setNotice(""); }}>×</button></div>}
+          {(notice || error) && <div className={`toast ${error ? "error" : ""}`} role="status" aria-live="polite">{error ? <AlertCircle size={17} /> : <Check size={17} />}<span>{error || notice}</span><button aria-label="Cerrar aviso" onClick={() => { setError(""); setNotice(""); }}>×</button></div>}
         </section>
       </main>
     </div>
@@ -297,7 +325,7 @@ export function Deliverables({ meetingDate, artifacts }: { meetingDate: string; 
   return <section className="outputs"><div className="section-title"><div><span className="step">03</span><h2>Entregables</h2></div><FileCheck2 size={21} /></div><div className="output-grid">{artifacts.map((artifact) => <a key={artifact.name} href={`/api/meetings/${meetingDate}/files/${encodeURIComponent(artifact.name)}`}><span><FileAudio size={18} /><span><strong>{artifact.final ? "Acta final" : ROLE_LABELS[artifact.role]} · {artifact.format}</strong><small>{artifact.name}</small></span></span><Download size={16} /></a>)}</div></section>;
 }
 
-export function ReviewForm({ review, update, busy, save, finalize }: { review: api.Review; update: (fn: (value: api.Review) => api.Review) => void; busy: boolean; save: () => void; finalize: () => void }) {
+export function ReviewForm({ review, update, busy, dirty, save, finalize }: { review: api.Review; update: (fn: (value: api.Review) => api.Review) => void; busy: boolean; dirty: boolean; save: () => void; finalize: () => void }) {
   return <div className="review-stack">
     <section className="review-card"><div className="section-title"><div><span className="step">02</span><h2>Confirmaciones humanas</h2></div><Radio size={21} /></div>
       <h3>Asistencia</h3><div className="participant-grid">{review.participants.map((person, index) => <div className="participant" key={`${person.name}-${index}`}><span className="avatar">{person.name.slice(0, 1)}</span><span className="person-copy"><strong>{person.name}</strong><small>{person.email || "Sin correo"}</small></span><select aria-label={`Asistencia de ${person.name}`} value={person.attended === true ? "yes" : person.attended === false ? "no" : ""} onChange={(e) => update((value) => ({ ...value, participants: value.participants.map((item, i) => i === index ? { ...item, attended: e.target.value === "yes" ? true : e.target.value === "no" ? false : null } : item) }))}><option value="">Por confirmar</option><option value="yes">Asistió</option><option value="no">No asistió</option></select></div>)}</div>
@@ -306,7 +334,7 @@ export function ReviewForm({ review, update, busy, save, finalize }: { review: a
       <h3>Nombres propios</h3><div className="proper-nouns"><textarea aria-label="Correcciones de nombres propios" value={Object.entries(review.proper_nouns).map(([from, to]) => `${from} → ${to}`).join("\n")} placeholder={'Una corrección por línea: “nombre incorrecto → Nombre Correcto”'} onChange={(e) => update((value) => ({ ...value, proper_nouns: Object.fromEntries(e.target.value.split("\n").map((line) => line.split(/\s*(?:→|=>)\s*/, 2)).filter((pair) => pair.length === 2 && pair[0] && pair[1])) }))} /><small>Usa una flecha por línea. Se aplicará al documento aprobado.</small></div>
       {!!review.quality_warnings.length && <div className="warning-list"><strong>Avisos de calidad</strong>{review.quality_warnings.map((warning) => <p key={warning}><AlertCircle size={14} />{warning}</p>)}</div>}
     </section>
-    <section className="approval-card"><label className="approval-check"><input type="checkbox" checked={review.approve_for_final_render} onChange={(e) => update((value) => ({ ...value, approve_for_final_render: e.target.checked }))} /><span><ShieldCheck size={22} /><span><strong>Aprobar para render final</strong><small>Confirmo que revisé asistencia, responsables y fechas.</small></span></span></label><div className="approval-actions"><button className="secondary-button" disabled={busy} onClick={save}><Save size={17} /> Guardar</button><button className="primary-button compact" disabled={busy || !review.approve_for_final_render} onClick={finalize}>{busy ? <LoaderCircle className="spin" size={17} /> : <FileCheck2 size={17} />} Finalizar acta</button></div></section>
+    <section className="approval-card"><div><label className="approval-check"><input type="checkbox" checked={review.approve_for_final_render} onChange={(e) => update((value) => ({ ...value, approve_for_final_render: e.target.checked }))} /><span><ShieldCheck size={22} /><span><strong>Aprobar para render final</strong><small>Confirmo que revisé asistencia, responsables y fechas.</small></span></span></label>{dirty && <p className="stale-output" role="status">Cambios sin guardar: los entregables finales actuales quedarán desactualizados al guardar.</p>}</div><div className="approval-actions"><button className="secondary-button" disabled={busy} onClick={save}><Save size={17} /> Guardar cambios</button><button className="primary-button compact" disabled={busy || !review.approve_for_final_render} onClick={finalize}>{busy ? <LoaderCircle className="spin" size={17} /> : <FileCheck2 size={17} />} Guardar y finalizar</button></div></section>
   </div>;
 }
 

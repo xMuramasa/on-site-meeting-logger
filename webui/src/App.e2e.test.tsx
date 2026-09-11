@@ -227,6 +227,55 @@ describe("Meeting Studio browser workflows", () => {
     }));
   });
 
+  it("keeps unsaved review edits when navigation is declined", async () => {
+    mocks.meetings.mockResolvedValue([
+      summary(),
+      summary({ date: "2026-09-04", stages: { validate: "complete" } }),
+    ]);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await renderApp();
+    await click(button("3 sept"));
+
+    const corrections = container.querySelector('textarea[aria-label="Correcciones de nombres propios"]') as HTMLTextAreaElement;
+    await setInput(corrections, "Obvio → Obvio Health");
+    await click(button("4 sept"));
+
+    expect(confirm).toHaveBeenCalledWith("Tienes cambios sin guardar. ¿Quieres descartarlos y cambiar de reunión?");
+    expect(container.textContent).toContain("REUNIÓN · 2026-09-03");
+    expect(corrections.value).toBe("Obvio → Obvio Health");
+  });
+
+  it("does not replace unsaved review edits during polling", async () => {
+    mocks.meetings.mockResolvedValue([summary()]);
+    await renderApp();
+    await click(button("3 sept"));
+
+    const corrections = container.querySelector('textarea[aria-label="Correcciones de nombres propios"]') as HTMLTextAreaElement;
+    await setInput(corrections, "Obvio → Obvio Health");
+    mocks.meeting.mockResolvedValue(detail());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2600)); });
+
+    expect(corrections.value).toBe("Obvio → Obvio Health");
+    expect(container.textContent).toContain("Cambios sin guardar");
+  });
+
+  it("explains each actionable meeting status in the archive", async () => {
+    mocks.meetings.mockResolvedValue([
+      summary({ job: { status: "running", stage: "transcribe" } }),
+      summary({ date: "2026-09-04", job: { status: "failed", stage: "transcribe", error_code: "PROCESSING_FAILED" } }),
+      summary({ date: "2026-09-05", job: { status: "cancelled", stage: "transcribe" } }),
+      summary({ date: "2026-09-06" }),
+      summary({ date: "2026-09-07", stages: { validate: "complete" } }),
+    ]);
+    await renderApp();
+
+    expect(container.textContent).toContain("Procesando · puedes cancelar");
+    expect(container.textContent).toContain("Falló · revisa y reanuda");
+    expect(container.textContent).toContain("Cancelada · puedes reanudar");
+    expect(container.textContent).toContain("Revisión pendiente · confirma y guarda");
+    expect(container.textContent).toContain("Acta validada · lista para descargar");
+  });
+
   it("shows microphone access errors in the capture form", async () => {
     mocks.useRecorder.mockReturnValue({
       recording: false, elapsed: 0, level: 0, file: null,
@@ -243,11 +292,11 @@ describe("Meeting Studio browser workflows", () => {
     await renderApp();
     await click(button("3 sept"));
 
-    await click(button("Finalizar acta"));
-    await waitFor(() => !button("Finalizar acta").hasAttribute("disabled"));
+    await click(button("Guardar y finalizar"));
+    await waitFor(() => !button("Guardar y finalizar").hasAttribute("disabled"));
     const corrections = container.querySelector('textarea[aria-label="Correcciones de nombres propios"]') as HTMLTextAreaElement;
     await setInput(corrections, "Obvio → Obvio Health");
-    await click(button("Finalizar acta"));
+    await click(button("Guardar y finalizar"));
 
     expect(mocks.saveReview).toHaveBeenCalledTimes(2);
     expect(mocks.finalize).toHaveBeenCalledTimes(2);
