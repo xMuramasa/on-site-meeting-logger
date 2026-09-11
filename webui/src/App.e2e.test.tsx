@@ -150,6 +150,53 @@ describe("Meeting Studio browser workflows", () => {
     expect(container.textContent).toContain("Procesamiento iniciado");
   });
 
+  it("uses an explicitly selected upload instead of a stale completed recording", async () => {
+    const recording = new File(["recording"], "grabacion.webm", { type: "audio/webm" });
+    const upload = new File(["upload"], "reunion-final.m4a", { type: "audio/mp4" });
+    mocks.useRecorder.mockReturnValue({
+      recording: false, elapsed: 12, level: 0, file: recording, error: "", warning: "",
+      start: vi.fn(), stop: vi.fn(), discard: vi.fn(),
+    });
+    await renderApp();
+    await waitFor(() => container.textContent?.includes("grabacion.webm") || false);
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(input, "files", { configurable: true, value: [upload] });
+    await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+
+    expect(container.textContent).toContain("Archivo seleccionado: reunion-final.m4a");
+    await click(button("Crear borrador de acta"));
+    expect(mocks.uploadMeeting).toHaveBeenCalledWith(expect.any(String), upload, undefined);
+    expect(mocks.uploadMeeting.mock.calls[0]?.[1]).toBe(upload);
+    expect(mocks.uploadMeeting.mock.calls[0]?.[1]).not.toBe(recording);
+  });
+
+  it("preserves the current selection when the file picker is cancelled", async () => {
+    await renderApp();
+    const upload = new File(["upload"], "reunion.m4a", { type: "audio/mp4" });
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(input, "files", { configurable: true, value: [upload] });
+    await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+    Object.defineProperty(input, "files", { configurable: true, value: [] });
+    await act(async () => input.dispatchEvent(new Event("change", { bubbles: true })));
+
+    expect(container.textContent).toContain("Archivo seleccionado: reunion.m4a");
+    await click(button("Crear borrador de acta"));
+    expect(mocks.uploadMeeting).toHaveBeenCalledWith(expect.any(String), upload, undefined);
+  });
+
+  it("makes recording state explicit and prevents submission until it stops", async () => {
+    mocks.useRecorder.mockReturnValue({
+      recording: true, elapsed: 9, level: .3, file: null, error: "", warning: "",
+      start: vi.fn(), stop: vi.fn(), discard: vi.fn(),
+    });
+    await renderApp();
+
+    expect(container.textContent).toContain("Grabando reunión");
+    expect(container.textContent).toContain("Detén la grabación antes de crear el borrador.");
+    expect(button("Crear borrador de acta")).toHaveProperty("disabled", true);
+  });
+
   it("renders durable job progress and lets the user cancel processing", async () => {
     mocks.meetings.mockResolvedValue([summary({ job: { status: "running", stage: "transcribe" } })]);
     mocks.meeting.mockResolvedValue(detail({ job: { status: "running", stage: "transcribe" }, review: null }));

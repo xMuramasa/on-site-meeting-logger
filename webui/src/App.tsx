@@ -96,7 +96,8 @@ function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<api.MeetingDetail | null>(null);
   const [meetingDate, setMeetingDate] = useState(today());
-  const [audio, setAudio] = useState<File | null>(null);
+  const [selectedAudio, setSelectedAudio] = useState<File | null>(null);
+  const [audioSource, setAudioSource] = useState<"recording" | "upload" | null>(null);
   const [previous, setPrevious] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -124,7 +125,17 @@ function App() {
   }, [selected]);
 
   const current = useMemo(() => items.find((item) => item.date === selected), [items, selected]);
-  const selectedAudio = capture.file || audio;
+  useEffect(() => {
+    if (!capture.file) return;
+    setSelectedAudio(capture.file);
+    setAudioSource("recording");
+  }, [capture.file]);
+
+  useEffect(() => {
+    if (!capture.recording) return;
+    setSelectedAudio(null);
+    setAudioSource(null);
+  }, [capture.recording]);
 
   async function recheckReadiness() {
     setBusy(true); setError(""); setNotice("Comprobando requisitos locales…");
@@ -140,6 +151,7 @@ function App() {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (capture.recording) return setError("Detén la grabación antes de crear el borrador.");
     if (!selectedAudio) return setError("Selecciona un audio o graba la reunión primero.");
     setBusy(true); setError(""); setNotice("Subiendo audio de forma local…");
     try {
@@ -227,24 +239,25 @@ function App() {
                     <button type="button" className="record-button" onClick={capture.recording ? capture.stop : capture.start} aria-label={capture.recording ? "Detener grabación" : "Grabar reunión"}>
                       {capture.recording ? <CircleStop size={25} /> : <Mic size={25} />}
                     </button>
-                    <div className="record-copy"><strong>{capture.recording ? "Grabando reunión" : capture.file ? "Grabación lista" : "Grabar con este Mac"}</strong><span>{capture.recording ? formatDuration(capture.elapsed) : capture.file?.name || "Usa el micrófono seleccionado en el navegador"}</span></div>
+                    <div className="record-copy"><strong>{capture.recording ? "Grabando reunión" : audioSource === "recording" && selectedAudio ? "Grabación lista" : "Grabar con este Mac"}</strong><span>{capture.recording ? formatDuration(capture.elapsed) : audioSource === "recording" && selectedAudio ? selectedAudio.name : "Usa el micrófono seleccionado en el navegador"}</span></div>
                     {capture.recording && <div className="meter" aria-label="Nivel de audio">{[.55,.8,.42,.95,.64,.38,.78,.5].map((factor, i) => <i key={i} style={{ height: `${Math.max(12, capture.level * factor * 120)}%` }} />)}</div>}
                   </div>
-                  {capture.file && <button type="button" className="text-button" onClick={capture.discard}><RotateCcw size={14} /> Descartar</button>}
+                  {audioSource === "recording" && selectedAudio && <button type="button" className="text-button" onClick={() => { capture.discard(); setSelectedAudio(null); setAudioSource(null); }}><RotateCcw size={14} /> Descartar</button>}
                 </div>
                 <p className="capture-help">El micrófono solo capta lo que oye el Mac. Para una llamada, selecciona una entrada que incluya el audio del sistema o sube la grabación de la plataforma.</p>
                 <div className="or"><span>o selecciona archivos</span></div>
                 <label className="file-drop">
-                  <input type="file" accept="audio/*,.m4a,.mp3,.wav,.mp4,.webm,.ogg" onChange={(event) => { setAudio(event.target.files?.[0] || null); capture.discard(); }} />
+                  <input type="file" accept="audio/*,.m4a,.mp3,.wav,.mp4,.webm,.ogg" onChange={(event) => { const file = event.target.files?.[0]; if (!file) return; capture.discard(); setSelectedAudio(file); setAudioSource("upload"); }} />
                   <span className="file-icon"><Upload size={20} /></span>
-                  <span><strong>{audio?.name || "Elegir audio"}</strong><small>{audio ? `${(audio.size / 1048576).toFixed(1)} MB` : "M4A, WAV, MP3, MP4, WebM u OGG"}</small></span>
+                  <span><strong>{audioSource === "upload" && selectedAudio ? `Archivo seleccionado: ${selectedAudio.name}` : "Elegir audio"}</strong><small>{audioSource === "upload" && selectedAudio ? `${(selectedAudio.size / 1048576).toFixed(1)} MB` : "M4A, WAV, MP3, MP4, WebM u OGG"}</small></span>
                 </label>
                 {selectedAudio && !capture.recording && <AudioPreview file={selectedAudio} />}
+                {capture.recording && <p className="capture-status" role="status">Detén la grabación antes de crear el borrador.</p>}
                 <div className="form-row">
                   <label><span>Fecha</span><div className="input-wrap"><CalendarDays size={16} /><input type="date" value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} required /></div></label>
                   <label><span>Acta anterior <em>opcional</em></span><div className="input-wrap file-compact"><FileText size={16} /><input type="file" accept="application/pdf,.pdf" onChange={(e) => setPrevious(e.target.files?.[0] || null)} /></div></label>
                 </div>
-                <button className="primary-button" disabled={!selectedAudio || busy || !boot?.readiness.ok}>{busy ? <LoaderCircle className="spin" size={18} /> : <Sparkles size={18} />}{busy ? "Preparando…" : "Crear borrador de acta"}</button>
+                <button className="primary-button" disabled={!selectedAudio || capture.recording || busy || !boot?.readiness.ok}>{busy ? <LoaderCircle className="spin" size={18} /> : <Sparkles size={18} />}{busy ? "Preparando…" : "Crear borrador de acta"}</button>
                 {capture.error && <p className="inline-error"><AlertCircle size={15} /> {capture.error}</p>}
                 {capture.warning && <p className="inline-error"><AlertCircle size={15} /> {capture.warning}</p>}
               </form>
