@@ -19,7 +19,7 @@ import {
   Sparkles,
   Upload,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "./api";
 import { AudioPreview } from "./AudioPreview";
 import { audioWarning, formatDuration } from "./lib";
@@ -112,25 +112,46 @@ function App() {
   const [error, setError] = useState("");
   const [reviewDirty, setReviewDirty] = useState(false);
   const capture = useRecorder();
+  const selectedRef = useRef(selected);
+  const reviewDirtyRef = useRef(reviewDirty);
+
+  selectedRef.current = selected;
+  reviewDirtyRef.current = reviewDirty;
 
   const refresh = useCallback(async (forceDetail = false) => {
-    const next = await api.meetings();
-    setItems(next);
-    if (selected && (!reviewDirty || forceDetail)) setDetail(await api.meeting(selected));
-  }, [reviewDirty, selected]);
+    try {
+      const next = await api.meetings();
+      setItems(next);
+      const meetingDate = selectedRef.current;
+      if (meetingDate && (!reviewDirtyRef.current || forceDetail)) {
+        const nextDetail = await api.meeting(meetingDate);
+        if (
+          selectedRef.current === meetingDate
+          && (!reviewDirtyRef.current || forceDetail)
+        ) setDetail(nextDetail);
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "No se pudo actualizar las reuniones");
+    }
+  }, []);
 
   useEffect(() => {
     api.bootstrap().then(setBoot).then(() => refresh()).catch((reason) => setError(reason.message));
   }, []); // bootstrap once
 
   useEffect(() => {
-    const id = window.setInterval(() => refresh().catch(() => undefined), 2500);
+    const id = window.setInterval(() => { void refresh(); }, 2500);
     return () => window.clearInterval(id);
   }, [refresh]);
 
   useEffect(() => {
     if (!selected) return;
-    if (!reviewDirty) api.meeting(selected).then(setDetail).catch((reason) => setError(reason.message));
+    if (reviewDirty) return;
+    let active = true;
+    api.meeting(selected)
+      .then((nextDetail) => { if (active) setDetail(nextDetail); })
+      .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "No se pudo abrir la reunión"); });
+    return () => { active = false; };
   }, [reviewDirty, selected]);
 
   useEffect(() => {
@@ -200,8 +221,19 @@ function App() {
     setBusy(true); setError("");
     try {
       await api.saveReview(selected, detail.review);
-      if (finalize) await api.finalize(selected);
       setReviewDirty(false);
+      if (finalize) {
+        try {
+          await api.finalize(selected);
+        } catch (reason) {
+          setError(
+            "La revisión se guardó, pero no se pudo iniciar la finalización: "
+            + (reason instanceof Error ? reason.message : "error desconocido"),
+          );
+          await refresh(true);
+          return;
+        }
+      }
       setNotice(finalize ? "Finalización iniciada. Los entregables se actualizarán cuando termine el proceso." : "Revisión guardada. Los entregables anteriores ya no están vigentes.");
       await refresh(true);
     } catch (reason) {

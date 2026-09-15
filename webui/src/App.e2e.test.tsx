@@ -97,6 +97,12 @@ async function waitFor(check: () => boolean) {
   throw new Error("Condition was not met");
 }
 
+function deferred<T>() {
+  let resolve: (value: T) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve: resolve! };
+}
+
 function button(label: string) {
   const found = [...container.querySelectorAll("button")].find((item) => item.textContent?.includes(label));
   if (!found) throw new Error(`Button not found: ${label}`);
@@ -296,6 +302,40 @@ describe("Meeting Studio browser workflows", () => {
     expect(container.textContent).toContain("Cambios sin guardar");
   });
 
+  it("ignores a stale detail response after selecting another meeting", async () => {
+    const firstDetail = deferred<MeetingDetail>();
+    mocks.meetings.mockResolvedValue([
+      summary(),
+      summary({ date: "2026-09-04", stages: { inspect: "complete", validate: "pending" } }),
+    ]);
+    mocks.meeting.mockImplementation((meetingDate: string) => (
+      meetingDate === "2026-09-03"
+        ? firstDetail.promise
+        : Promise.resolve(detail({
+          date: "2026-09-04",
+          review: { ...review, participants: [{ name: "Beatriz", email: null, attended: null }] },
+        }))
+    ));
+    await renderApp();
+
+    await click(button("3 sept"));
+    await click(button("4 sept"));
+    await waitFor(() => Boolean(container.querySelector('select[aria-label="Asistencia de Beatriz"]')));
+    await act(async () => { firstDetail.resolve(detail()); });
+
+    expect(container.querySelector('select[aria-label="Asistencia de Beatriz"]')).not.toBeNull();
+    expect(container.querySelector('select[aria-label="Asistencia de Ana"]')).toBeNull();
+  });
+
+  it("shows a refresh failure instead of leaving an unhandled request", async () => {
+    mocks.meetings.mockRejectedValue(new Error("backend offline"));
+    await renderApp();
+
+    await click(container.querySelector('button[aria-label="Actualizar"]')!);
+
+    expect(container.textContent).toContain("backend offline");
+  });
+
   it("explains each actionable meeting status in the archive", async () => {
     mocks.meetings.mockResolvedValue([
       summary({ job: { status: "running", stage: "transcribe" } }),
@@ -338,6 +378,22 @@ describe("Meeting Studio browser workflows", () => {
     expect(mocks.saveReview).toHaveBeenCalledTimes(2);
     expect(mocks.finalize).toHaveBeenCalledTimes(2);
     expect(mocks.finalize).toHaveBeenLastCalledWith("2026-09-03");
+  });
+
+  it("keeps a successfully saved review acknowledged when finalization fails", async () => {
+    mocks.meetings.mockResolvedValue([summary()]);
+    mocks.meeting.mockResolvedValue(detail({ review: { ...review, approve_for_final_render: true } }));
+    mocks.finalize.mockRejectedValue(new Error("finalization unavailable"));
+    await renderApp();
+    await click(button("3 sept"));
+
+    const corrections = container.querySelector('textarea[aria-label="Correcciones de nombres propios"]') as HTMLTextAreaElement;
+    await setInput(corrections, "Obvio → Obvio Health");
+    await click(button("Guardar y finalizar"));
+
+    expect(mocks.saveReview).toHaveBeenCalledOnce();
+    expect(container.textContent).not.toContain("Cambios sin guardar");
+    expect(container.textContent).toContain("La revisión se guardó, pero no se pudo iniciar la finalización");
   });
 
   it("reports duplicate upload requests without hiding the server reason", async () => {
