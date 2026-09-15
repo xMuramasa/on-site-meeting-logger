@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from meeting_pipeline.errors import PipelineBusyError
 from meeting_pipeline.manifest import complete_stage, fail_stage, start_stage, write_manifest
 from meeting_pipeline.models import CanonicalActa, PipelineManifest
 from meeting_pipeline.readiness import ReadinessCheck, ReadinessReport
@@ -376,6 +377,41 @@ def test_cancel_and_restart_are_durable_and_resume_in_background(tmp_path):
     assert api.post("/api/meetings/2026-09-03/restart", headers=headers).status_code == 202
     assert not (meeting / "build" / ".cancel-requested").exists()
     assert calls == [(meeting, "generate_review")]
+
+
+def test_restart_rejects_an_active_job_without_corrupting_its_stage_state(tmp_path):
+    meeting = tmp_path / "meetings" / "2026-09-03"
+    source = meeting / "source" / "meeting.webm"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"audio")
+    manifest = PipelineManifest.model_validate(
+        {
+            "pipeline_version": "test",
+            "meeting_dir": str(meeting),
+            "meeting_date": "2026-09-03",
+            "created_at": "2026-09-03T00:00:00Z",
+            "updated_at": "2026-09-03T00:00:00Z",
+            "source_filename": "meeting.webm",
+            "source_sha256": "a" * 64,
+        }
+    )
+    write_manifest(meeting / "manifest.json", manifest)
+    api = client(
+        tmp_path,
+        runner=lambda *_args, **_kwargs: (_ for _ in ()).throw(PipelineBusyError("busy")),
+    )
+    manifest = PipelineManifest.model_validate_json((meeting / "manifest.json").read_text())
+    start_stage(manifest, "consolidate")
+    write_manifest(meeting / "manifest.json", manifest)
+    headers = {"origin": "http://127.0.0.1:8765", "x-csrf-token": "test-csrf-token"}
+
+    response = api.post("/api/meetings/2026-09-03/restart", headers=headers)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "a pipeline job is already active for this meeting"
+    stages = PipelineManifest.model_validate_json((meeting / "manifest.json").read_text()).stages
+    assert stages["consolidate"].status == "running"
+    assert "generate_review" not in stages
 
 
 def test_meeting_artifacts_are_manifest_backed_and_final_only_after_validation(tmp_path):

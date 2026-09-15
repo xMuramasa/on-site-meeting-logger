@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from .errors import PipelineError
+from .errors import PipelineBusyError, PipelineError
 from .ingest import SUPPORTED_AUDIO, ingest_meeting
 from .manifest import fail_stage, load_manifest, meeting_lock, write_manifest, write_text_atomic
 from .models import AudioLevelAnalysis, ReviewState
@@ -278,6 +278,9 @@ def create_app(
     def start_job(meeting_dir: Path, until: str) -> None:
         try:
             runner(meeting_dir, until=until, config_path=config_path)
+        except PipelineBusyError:
+            # A request that raced another accepted job must not overwrite its stage state.
+            return
         except Exception:
             # run_stages persists its active stage. This keeps custom runners safe too.
             manifest_path = meeting_dir / "manifest.json"
@@ -299,6 +302,13 @@ def create_app(
         if not path.is_dir():
             raise HTTPException(status_code=404, detail="meeting not found")
         return path
+
+    def reject_active_job(path: Path, manifest: Any | None = None) -> None:
+        job = _durable_job(manifest) if manifest is not None else _job_for_meeting(path)
+        if job and job["status"] == "running":
+            raise HTTPException(
+                status_code=409, detail="a pipeline job is already active for this meeting"
+            )
 
     @app.get("/api/bootstrap")
     def bootstrap() -> dict[str, Any]:
@@ -346,6 +356,7 @@ def create_app(
             )
             raise HTTPException(status_code=503, detail=f"pipeline is not ready: {failures}")
         parsed = _safe_date(meeting_date)
+        reject_active_job(root / parsed.isoformat())
         request_dir = incoming / secrets.token_urlsafe(16)
         request_dir.mkdir(mode=0o700)
         try:
@@ -409,6 +420,7 @@ def create_app(
     @app.post("/api/meetings/{meeting_date}/finalize", status_code=202)
     def finalize(meeting_date: str, background: BackgroundTasks) -> dict[str, str]:
         path = meeting_path(meeting_date)
+        reject_active_job(path)
         try:
             review = load_review(path / "review.yaml")
         except PipelineError as exc:
@@ -433,6 +445,7 @@ def create_app(
             raise HTTPException(
                 status_code=409, detail="this meeting has no processing state to resume"
             ) from exc
+        reject_active_job(path, manifest)
         if any(
             state.status == "failed" and state.error_code == "NO_SPEECH"
             for state in manifest.stages.values()
