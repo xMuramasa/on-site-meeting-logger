@@ -18,9 +18,17 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .errors import PipelineBusyError, PipelineError
 from .ingest import SUPPORTED_AUDIO, ingest_meeting
-from .manifest import fail_stage, load_manifest, meeting_lock, write_manifest, write_text_atomic
+from .manifest import (
+    block_stage,
+    fail_stage,
+    load_manifest,
+    meeting_lock,
+    write_manifest,
+    write_text_atomic,
+)
 from .models import AudioLevelAnalysis, ReviewState
 from .pipeline import (
+    STAGES,
     clear_cancellation,
     invalidate_stages_from,
     request_cancellation,
@@ -66,6 +74,9 @@ def _durable_job(manifest: Any) -> dict[str, Any] | None:
         if state.status == "running":
             return {"status": "running", "stage": name}
     for name, state in reversed(states):
+        if state.status == "blocked":
+            return {"status": "blocked", "stage": name, "retryable": True}
+    for name, state in reversed(states):
         if state.status in {"failed", "cancelled"}:
             result = {"status": state.status, "stage": name}
             if state.status == "failed":
@@ -97,6 +108,15 @@ def _mark_interrupted_jobs(root: Path) -> None:
                         break
         except PipelineError:
             continue
+
+
+def _first_pending_stage(manifest: Any, until: str) -> str | None:
+    """The stage a run would actually start at, so recording a wait never erases a result."""
+    for name in STAGES[: STAGES.index(until) + 1]:
+        state = manifest.stages.get(name)
+        if state is None or state.status != "complete":
+            return name
+    return None
 
 
 def _job_for_meeting(path: Path) -> dict[str, Any] | None:
@@ -278,8 +298,23 @@ def create_app(
     def start_job(meeting_dir: Path, until: str) -> None:
         try:
             runner(meeting_dir, until=until, config_path=config_path)
-        except PipelineBusyError:
-            # A request that raced another accepted job must not overwrite its stage state.
+        except PipelineBusyError as exc:
+            # Contention is not a failure: record it as blocked so the UI can say so and the
+            # operator can resume, without overwriting the stage state of the winning job.
+            manifest_path = meeting_dir / "manifest.json"
+            if manifest_path.is_file():
+                try:
+                    with meeting_lock(meeting_dir):
+                        manifest = load_manifest(manifest_path)
+                        pending = _first_pending_stage(manifest, until)
+                        if pending and not any(
+                            state.status == "running" for state in manifest.stages.values()
+                        ):
+                            block_stage(manifest, pending, str(exc))
+                            write_manifest(manifest_path, manifest)
+                except PipelineBusyError:
+                    # Another runner owns this meeting; do not write from a stale snapshot.
+                    pass
             return
         except Exception:
             # run_stages persists its active stage. This keeps custom runners safe too.
@@ -309,6 +344,19 @@ def create_app(
             raise HTTPException(
                 status_code=409, detail="a pipeline job is already active for this meeting"
             )
+        # One deployment root, one expensive job: the local models cannot serve two meetings.
+        for other in sorted(root.glob("????-??-??")):
+            if other.resolve() == path.resolve():
+                continue
+            running = _job_for_meeting(other)
+            if running and running["status"] == "running":
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"the meeting of {other.name} is still being processed on this "
+                        "deployment; wait for it to finish or cancel it first"
+                    ),
+                )
 
     @app.get("/api/bootstrap")
     def bootstrap() -> dict[str, Any]:

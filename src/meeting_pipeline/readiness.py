@@ -131,14 +131,19 @@ def check_readiness(
             http_client.close()
 
     checks = [endpoint, _check_model_identity(settings, model_ids)]
+    transcription = settings.transcription
     try:
-        model_loader(settings.transcription)
+        model_loader(transcription)
     except Exception as exc:
-        checks.append(ReadinessCheck(name="faster-whisper-model", ok=False, detail=str(exc)))
+        # The loader's own message names the provider and the extra to install; device
+        # advice belongs to the provider, not to this check.
+        checks.append(ReadinessCheck(name="transcription-model", ok=False, detail=str(exc)))
     else:
         checks.append(
             ReadinessCheck(
-                name="faster-whisper-model", ok=True, detail=settings.transcription.model
+                name="transcription-model",
+                ok=True,
+                detail=f"{transcription.provider}: {transcription.model}",
             )
         )
 

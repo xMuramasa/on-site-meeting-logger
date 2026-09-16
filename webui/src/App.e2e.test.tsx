@@ -343,10 +343,12 @@ describe("Meeting Studio browser workflows", () => {
       summary({ date: "2026-09-05", job: { status: "cancelled", stage: "transcribe" } }),
       summary({ date: "2026-09-06" }),
       summary({ date: "2026-09-07", stages: { validate: "complete" } }),
+      summary({ date: "2026-09-08", job: { status: "blocked", stage: "transcribe", retryable: true } }),
     ]);
     await renderApp();
 
     expect(container.textContent).toContain("Procesando · puedes cancelar");
+    expect(container.textContent).toContain("En espera · otra reunión usa los modelos");
     expect(container.textContent).toContain("Falló · revisa y reanuda");
     expect(container.textContent).toContain("Cancelada · puedes reanudar");
     expect(container.textContent).toContain("Revisión pendiente · confirma y guarda");
@@ -419,6 +421,28 @@ describe("Meeting Studio browser workflows", () => {
 
     expect(container.textContent).toContain("PROCESSING_FAILED");
     expect(mocks.restart).toHaveBeenCalledWith("2026-09-03");
+  });
+
+  it("lets a blocked meeting resume without presenting contention as a failure", async () => {
+    const blocked = { status: "blocked" as const, stage: "transcribe", retryable: true };
+    mocks.meetings.mockResolvedValue([summary({ job: blocked })]);
+    mocks.meeting.mockResolvedValue(detail({ job: blocked, review: null }));
+    await renderApp();
+
+    await click(button("3 sept"));
+
+    expect(container.textContent).toContain("Otra reunión está usando los modelos locales");
+    expect(container.textContent).not.toContain("PROCESSING_FAILED");
+    await click(button("Reanudar"));
+    expect(mocks.restart).toHaveBeenCalledWith("2026-09-03");
+  });
+
+  it("accepts the previous meeting's Markdown acta as explicit context", async () => {
+    await renderApp();
+
+    const previous = [...container.querySelectorAll('input[type="file"]')].at(-1);
+    expect(previous?.getAttribute("accept")).toContain(".md");
+    expect(previous?.getAttribute("accept")).toContain(".pdf");
   });
 
   it("exposes final document downloads with meeting-scoped links", async () => {

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .errors import ConfigError
 from .resources import resource
@@ -35,13 +35,40 @@ class MeetingDefaults(_Base):
 
 
 class TranscriptionSettings(_Base):
-    provider: Literal["faster-whisper"] = "faster-whisper"
+    provider: Literal["faster-whisper", "mlx-whisper"] = "faster-whisper"
     model: str = "medium"
     device: str = "auto"
     compute_type: str = "auto"
     language: str | None = "es"
     vad_filter: bool = True
     beam_size: int = Field(default=5, ge=1)
+
+    @model_validator(mode="after")
+    def _provider_supports_requested_options(self) -> TranscriptionSettings:
+        """Refuse options a provider cannot honour instead of ignoring them silently.
+
+        `mlx_whisper.transcribe` has no voice-activity filter (it relies on the upstream
+        `no_speech_threshold`/`logprob_threshold` fallbacks) and always runs on Apple
+        Silicon unified memory, so `device` and `vad_filter` have no meaning there.
+        """
+        if self.provider == "mlx-whisper":
+            if self.vad_filter:
+                raise ValueError(
+                    "mlx-whisper has no voice-activity filter; set transcription.vad_filter: "
+                    "false, or use provider: faster-whisper"
+                )
+            if self.device != "auto":
+                raise ValueError(
+                    "mlx-whisper runs on Apple Silicon unified memory; set transcription.device: "
+                    f"auto (got {self.device!r})"
+                )
+            if self.beam_size != 1:
+                raise ValueError(
+                    "mlx-whisper does not implement beam search; set transcription.beam_size: 1"
+                )
+            if self.compute_type not in {"auto", "float16", "float32"}:
+                raise ValueError("mlx-whisper compute_type must be auto, float16, or float32")
+        return self
 
 
 class ReasoningSettings(_Base):
@@ -55,6 +82,18 @@ class ReasoningSettings(_Base):
     timeout_seconds: float = Field(default=300.0, gt=0.0)
     max_retries: int = Field(default=2, ge=0, le=10)
     max_response_bytes: int = Field(default=4 * 1024 * 1024, ge=1024)
+    # Token estimate divisor for the pre-request context check. No tokenizer is installed,
+    # so this is an explicit estimate, not a measurement; lower it to be more conservative.
+    chars_per_token: float = Field(default=3.6, gt=0.0)
+
+    @model_validator(mode="after")
+    def _output_fits_the_context_window(self) -> ReasoningSettings:
+        if self.max_output_tokens >= self.context_window:
+            raise ValueError(
+                f"max_output_tokens ({self.max_output_tokens}) must be smaller than "
+                f"context_window ({self.context_window})"
+            )
+        return self
 
     def resolve_api_key(self) -> str | None:
         """The key is only ever read from the environment, never from a config file."""

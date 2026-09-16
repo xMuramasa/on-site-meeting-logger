@@ -443,7 +443,7 @@ class ReviewState(Strict):
     approve_for_final_render: bool = False
 
 
-StageStatus = Literal["pending", "running", "complete", "failed", "cancelled"]
+StageStatus = Literal["pending", "running", "complete", "failed", "cancelled", "blocked"]
 
 
 class StageState(Strict):

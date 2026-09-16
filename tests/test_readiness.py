@@ -40,7 +40,7 @@ def test_check_readiness_reports_every_required_dependency(tmp_path):
     assert [check.name for check in report.checks] == [
         "model-endpoint",
         "model-identity",
-        "faster-whisper-model",
+        "transcription-model",
         "ffmpeg",
         "output-permissions",
         "chromium-pdf",
@@ -65,7 +65,7 @@ def test_check_readiness_keeps_independent_failures_in_one_report(tmp_path):
     assert {check.name for check in report.checks if not check.ok} == {
         "model-endpoint",
         "model-identity",
-        "faster-whisper-model",
+        "transcription-model",
         "ffmpeg",
         "chromium-pdf",
         "free-disk-space",

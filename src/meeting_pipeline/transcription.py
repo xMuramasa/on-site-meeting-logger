@@ -1,8 +1,12 @@
-"""Local faster-whisper transcription with dependency injection for tests."""
+"""Local transcription (faster-whisper or MLX Whisper) with dependency injection for tests."""
 
 from __future__ import annotations
 
+import contextlib
+import platform
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from .config import TranscriptionSettings
@@ -11,8 +15,95 @@ from .manifest import write_json_atomic
 from .models import AudioMetadata, EvidenceRange, Transcript, TranscriptSegment, format_timestamp
 from .transcript_quality import detect_degraded_ranges
 
+MLX_TURBO_MODEL = "mlx-community/whisper-large-v3-turbo"
+
+
+def _import_mlx_whisper() -> Any:
+    """Import the optional macOS-only backend, or explain exactly what is missing."""
+    if sys.platform != "darwin" or platform.machine() != "arm64":
+        raise ModelUnavailableError(
+            "mlx-whisper requires macOS on Apple Silicon (arm64); "
+            "use transcription.provider: faster-whisper on this machine"
+        )
+    try:
+        import mlx_whisper
+    except ImportError as exc:
+        raise ModelUnavailableError(
+            "mlx-whisper is not installed; run `uv sync --extra stt-mlx`"
+        ) from exc
+    return mlx_whisper
+
+
+def _release_mlx_weights() -> None:
+    """Drop the process-wide weight cache so the reasoning model can have the memory back.
+
+    `mlx_whisper.transcribe` keeps the last model on a module-level `ModelHolder`; on a
+    16 GB machine that would sit next to llama.cpp for the rest of the run. Releasing must
+    never turn a finished transcription into a failure, hence the broad suppression.
+    """
+    with contextlib.suppress(Exception):
+        from mlx_whisper.transcribe import ModelHolder
+
+        ModelHolder.model = None
+        ModelHolder.model_path = None
+    with contextlib.suppress(Exception):
+        import mlx.core as mx
+
+        clear = getattr(mx, "clear_cache", None) or mx.metal.clear_cache
+        clear()
+
+
+class MlxWhisperEngine:
+    """Duck-types faster-whisper's `.transcribe()` so the pipeline stays backend-neutral.
+
+    Upstream (`mlx_whisper/transcribe.py`) returns `{"text", "segments", "language"}` and
+    reports no language probability, so none is fabricated here.
+    """
+
+    def __init__(self, settings: TranscriptionSettings) -> None:
+        self.settings = settings
+        # Verify availability now; weights download/load lazily on the first transcription.
+        _import_mlx_whisper()
+
+    def transcribe(
+        self,
+        audio: str,
+        *,
+        language: str | None = None,
+        vad_filter: bool = False,
+        beam_size: int = 1,
+    ) -> tuple[Any, Any]:
+        mlx_whisper = _import_mlx_whisper()
+        try:
+            result = mlx_whisper.transcribe(
+                audio,
+                path_or_hf_repo=self.settings.model,
+                language=language,
+                # MLX 0.4.3 raises for any non-None beam_size, including 1.
+                # Omitting it selects the supported greedy decoder.
+                fp16=self.settings.compute_type != "float32",
+                word_timestamps=False,
+            )
+        finally:
+            _release_mlx_weights()
+        segments = [
+            SimpleNamespace(
+                id=int(item.get("id", index)),
+                start=float(item["start"]),
+                end=float(item["end"]),
+                text=str(item.get("text", "")),
+                no_speech_prob=item.get("no_speech_prob"),
+                avg_logprob=item.get("avg_logprob"),
+            )
+            for index, item in enumerate(result.get("segments") or [])
+        ]
+        info = SimpleNamespace(language=str(result.get("language") or language or "unknown"))
+        return iter(segments), info
+
 
 def _load_model(settings: TranscriptionSettings) -> Any:
+    if settings.provider == "mlx-whisper":
+        return MlxWhisperEngine(settings)
     try:
         from faster_whisper import WhisperModel
     except ImportError as exc:

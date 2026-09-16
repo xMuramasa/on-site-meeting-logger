@@ -20,8 +20,10 @@ from .errors import (
     PipelineError,
 )
 from .manifest import (
+    DEPLOYMENT_LOCK_WAIT_SECONDS,
     cancel_stage,
     complete_stage,
+    deployment_lock,
     fail_stage,
     fingerprint,
     load_manifest,
@@ -36,8 +38,9 @@ from .models import AudioLevelAnalysis, AudioMetadata, CanonicalActa, StageState
 from .pdf import export_pdf
 from .previous_context import extract_previous_context
 from .providers.openai_compatible import OpenAICompatibleProvider
-from .reasoning import generate_acta_draft, write_draft_artifacts
+from .reasoning import SYSTEM_PROMPT_FINGERPRINT, generate_acta_draft, write_draft_artifacts
 from .rendering import artifact_stem, render_documents
+from .resources import resource
 from .review import apply_review, generate_review, load_review
 from .transcription import transcribe_audio, write_transcript_files
 from .validation import require_valid, validate_meeting
@@ -255,15 +258,16 @@ def _run_stages(
     stage = "consolidate"
     draft_path = build / "acta-draft.json"
     prompt_hashes = [
-        sha256_file(Path(__file__).resolve().parents[2] / "prompts" / name)
+        sha256_file(resource("prompts", name))
         for name in ("extract-chunk.md", "consolidate-acta.md")
     ]
     consolidate_fp = fingerprint(
-        "consolidate-v1",
+        "consolidate-v2",
         sha256_file(chunks_path),
         sha256_file(context_path),
         settings.reasoning.model_dump(mode="json", exclude={"base_url", "api_key_env"}),
         prompt_hashes,
+        SYSTEM_PROMPT_FINGERPRINT,
     )
     if not stage_is_current(manifest, stage, consolidate_fp):
         begin(stage)
@@ -409,11 +413,18 @@ def run_stages(
     audio_probe: Callable[[Path], AudioMetadata] = probe_audio,
     audio_level_inspector: Callable[[Path], AudioLevelAnalysis] | None = None,
     pdf_exporter: Callable[..., Path] = export_pdf,
+    busy_wait_seconds: float = DEPLOYMENT_LOCK_WAIT_SECONDS,
 ) -> PipelineResult:
-    """Run one meeting exclusively and leave every attempted stage durable and resumable."""
+    """Run one meeting exclusively and leave every attempted stage durable and resumable.
+
+    The deployment lock is taken first and covers *every* meeting under the same output
+    root, so a second meeting waits (briefly) and is then refused rather than fighting the
+    first one for memory. It is released before any stage state is touched, so contention
+    never lands in the manifest as a failure.
+    """
     meeting_dir = Path(meeting_dir).expanduser().resolve()
     manifest_path = meeting_dir / "manifest.json"
-    with meeting_lock(meeting_dir):
+    with deployment_lock(meeting_dir.parent, busy_wait_seconds), meeting_lock(meeting_dir):
         try:
             return _run_stages(
                 meeting_dir,

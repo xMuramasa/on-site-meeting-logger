@@ -15,7 +15,8 @@ export type Review = {
 };
 export type FailureCode = "NO_SPEECH" | "MODEL_UNAVAILABLE" | "AUDIO_DECODE_FAILED" | "STORAGE_UNAVAILABLE" | "JOB_INTERRUPTED" | "PROCESSING_FAILED";
 export type Job = {
-  status: "running" | "complete" | "failed" | "cancelled";
+  // "blocked" means another meeting holds the local models — a wait, not a failure.
+  status: "running" | "complete" | "failed" | "cancelled" | "blocked";
   stage: string;
   error_code?: FailureCode;
   retryable?: boolean;

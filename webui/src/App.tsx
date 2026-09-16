@@ -8,6 +8,7 @@ import {
   FileAudio,
   FileCheck2,
   FileText,
+  Hourglass,
   LoaderCircle,
   Mic,
   Plus,
@@ -59,9 +60,15 @@ function StatusDot({ state }: { state?: string }) {
 function meetingStatus(item: api.MeetingSummary) {
   if (item.stages.validate === "complete") return "Acta validada · lista para descargar";
   if (item.job?.status === "running") return "Procesando · puedes cancelar";
+  if (item.job?.status === "blocked") return "En espera · otra reunión usa los modelos";
   if (item.job?.status === "failed") return "Falló · revisa y reanuda";
   if (item.job?.status === "cancelled") return "Cancelada · puedes reanudar";
   return "Revisión pendiente · confirma y guarda";
+}
+
+export function DeploymentBlocked({ job, busy, restart }: { job: api.Job; busy: boolean; restart: () => void }) {
+  const stage = STAGE_LABELS[job.stage] || job.stage;
+  return <div className="error-banner"><Hourglass size={18} /><div><strong>En espera antes de: {stage}</strong><span>Otra reunión está usando los modelos locales de esta instalación. Nada se perdió; reanuda cuando termine.</span></div><button className="secondary-button" disabled={busy} onClick={restart}><RotateCcw size={16} /> Reanudar</button></div>;
 }
 
 export function ProcessingFailure({ job, busy, restart }: { job: api.Job; busy: boolean; restart: () => void }) {
@@ -74,7 +81,7 @@ function readinessAdvice(name: string) {
   const advice: Record<string, string> = {
     "model-endpoint": "Inicia el servidor de modelo local y confirma que responde.",
     "model-identity": "El modelo configurado no está disponible; verifica el nombre configurado.",
-    "faster-whisper-model": "Instala o descarga el modelo de transcripción configurado.",
+    "transcription-model": "Instala o descarga el modelo de transcripción configurado.",
     ffmpeg: "Instala ffmpeg y ffprobe, luego vuelve a comprobar.",
     "output-permissions": "Elige una carpeta de destino local con permisos de escritura.",
     "chromium-pdf": "Instala un navegador Chromium compatible para exportar PDF.",
@@ -329,7 +336,7 @@ function App() {
                 {capture.recording && <p className="capture-status" role="status">Detén la grabación antes de crear el borrador.</p>}
                 <div className="form-row">
                   <label><span>Fecha</span><div className="input-wrap"><CalendarDays size={16} /><input type="date" value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} required /></div></label>
-                  <label><span>Acta anterior <em>opcional</em></span><div className="input-wrap file-compact"><FileText size={16} /><input type="file" accept="application/pdf,.pdf" onChange={(e) => setPrevious(e.target.files?.[0] || null)} /></div></label>
+                  <label><span>Acta anterior <em>opcional</em></span><div className="input-wrap file-compact"><FileText size={16} /><input type="file" accept=".pdf,.md,.markdown,.html,.htm,.json" onChange={(e) => setPrevious(e.target.files?.[0] || null)} /></div></label>
                 </div>
                 <button className="primary-button" disabled={!selectedAudio || capture.recording || busy || !boot?.readiness.ok}>{busy ? <LoaderCircle className="spin" size={18} /> : <Sparkles size={18} />}{busy ? "Preparando…" : "Crear borrador de acta"}</button>
                 {capture.error && <p className="inline-error"><AlertCircle size={15} /> {capture.error}</p>}
@@ -338,8 +345,9 @@ function App() {
             </div>
           ) : (
             <div className="meeting-detail">
-              <div className="detail-head"><div><span className="eyebrow accent">REUNIÓN · {selected}</span><h1>Revisión del acta</h1><p>Confirma solamente lo que una persona pueda respaldar.</p></div><div className={`job-badge ${detail?.job?.status || "idle"}`}>{detail?.job?.status === "running" && <LoaderCircle className="spin" size={15} />}{detail?.job?.status === "failed" ? "Error" : detail?.job?.status === "running" ? "Procesando" : current?.stages.validate === "complete" ? "Validada" : "Lista"}</div></div>
+              <div className="detail-head"><div><span className="eyebrow accent">REUNIÓN · {selected}</span><h1>Revisión del acta</h1><p>Confirma solamente lo que una persona pueda respaldar.</p></div><div className={`job-badge ${detail?.job?.status || "idle"}`}>{detail?.job?.status === "running" && <LoaderCircle className="spin" size={15} />}{detail?.job?.status === "failed" ? "Error" : detail?.job?.status === "running" ? "Procesando" : detail?.job?.status === "blocked" ? "En espera" : current?.stages.validate === "complete" ? "Validada" : "Lista"}</div></div>
 
+              {detail?.job?.status === "blocked" && <DeploymentBlocked job={detail.job} busy={busy} restart={() => controlProcessing("restart")} />}
               {detail?.job?.status === "failed" && <ProcessingFailure job={detail.job} busy={busy} restart={() => controlProcessing("restart")} />}
               {detail?.audio_analysis && audioWarning(detail.audio_analysis.classification) && <div className="error-banner"><AlertCircle size={18} /><div><strong>Revisa la fuente de audio</strong><span>{audioWarning(detail.audio_analysis.classification)}</span></div></div>}
               {detail?.job?.status === "running" && <button className="secondary-button" disabled={busy} onClick={() => controlProcessing("cancel")}><CircleStop size={16} /> Cancelar</button>}

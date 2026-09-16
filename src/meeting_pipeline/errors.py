@@ -41,6 +41,10 @@ class SchemaRepairError(ProviderError):
     """Model output still failed schema validation after the single repair attempt."""
 
 
+class ContextBudgetError(ProviderError):
+    """The prompt plus schema plus reserved output cannot fit the configured context window."""
+
+
 class PreviousContextError(PipelineError):
     """Previous acta PDF unreadable or lacking a text layer."""
 

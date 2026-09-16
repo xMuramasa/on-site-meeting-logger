@@ -24,6 +24,10 @@ and unknown owners or dates stay unresolved until review.
     cd /Users/muramasa/Github/Personal/meeting-pipeline
     uv sync --extra stt
 
+On a Mac mini / Apple Silicon, `uv sync --extra stt-mlx` installs the MLX Whisper backend
+instead; see `docs/native-mac-mini.md` and `config/mac-mini.yaml`. `faster-whisper` stays the
+default and the cross-platform fallback.
+
 ## Start the local reasoning model
 
 Follow `deploy/llama-cpp/README.md`. The server is deliberately not started by the pipeline.
@@ -116,6 +120,7 @@ read-only and never deletes files.
 
 See:
 
+- `docs/native-mac-mini.md`
 - `docs/weekly-workflow.md`
 - `docs/troubleshooting.md`
 - `docs/privacy-and-retention.md`

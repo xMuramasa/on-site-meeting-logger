@@ -22,6 +22,9 @@ dependencies = [
 [project.optional-dependencies]
 # Heavy, platform-specific. Imported lazily so the rest of the pipeline installs anywhere.
 stt = ["faster-whisper>=1.0"]
+# MLX only exists for macOS on Apple Silicon; the marker keeps `--extra stt-mlx` resolvable
+# everywhere else, where the adapter then refuses with an actionable message.
+stt-mlx = ["mlx-whisper>=0.4; sys_platform == 'darwin' and platform_machine == 'arm64'"]
 
 [project.scripts]
 meeting = "meeting_pipeline.cli:app"

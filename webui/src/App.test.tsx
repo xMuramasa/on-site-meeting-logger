@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { Deliverables, ProcessingFailure, ReadinessPanel, ReviewForm } from "./App";
+import { Deliverables, DeploymentBlocked, ProcessingFailure, ReadinessPanel, ReviewForm } from "./App";
 import type { Artifact, Job, Review } from "./api";
 
 const review: Review = {
@@ -59,6 +59,21 @@ describe("ProcessingFailure", () => {
   });
 });
 
+describe("DeploymentBlocked", () => {
+  it("explains contention as a wait, not a failure, and offers to resume", () => {
+    const job: Job = { status: "blocked", stage: "consolidate", retryable: true };
+    const markup = renderToStaticMarkup(
+      <DeploymentBlocked job={job} busy={false} restart={() => undefined} />,
+    );
+
+    expect(markup).toContain("Borrador estructurado");
+    expect(markup).toContain("Otra reunión está usando los modelos locales");
+    expect(markup).toContain("Reanudar");
+    expect(markup).not.toContain("Error");
+    expect(markup).not.toContain("Falló");
+  });
+});
+
 describe("ReadinessPanel", () => {
   it("shows actionable diagnostics and offers a recheck before upload", () => {
     const markup = renderToStaticMarkup(
@@ -68,6 +83,7 @@ describe("ReadinessPanel", () => {
           checks: [
             { name: "model-identity", ok: false, detail: "configured model missing" },
             { name: "model-endpoint", ok: false, detail: "connection refused" },
+            { name: "transcription-model", ok: false, detail: "mlx-whisper is not installed" },
           ],
         }}
         busy={false}
@@ -78,6 +94,7 @@ describe("ReadinessPanel", () => {
     expect(markup).toContain("Antes de subir audio");
     expect(markup).toContain("Inicia el servidor de modelo local y confirma que responde.");
     expect(markup).toContain("El modelo configurado no está disponible; verifica el nombre configurado.");
+    expect(markup).toContain("Instala o descarga el modelo de transcripción configurado.");
     expect(markup).toContain("Volver a comprobar");
 
   });

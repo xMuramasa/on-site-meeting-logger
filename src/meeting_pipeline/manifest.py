@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import tempfile
+import time
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -132,6 +133,46 @@ def cancel_stage(manifest: PipelineManifest, name: str, note: str) -> None:
     state.status = "cancelled"
     state.note = note
     state.failed_at = datetime.now(UTC)
+
+
+def block_stage(manifest: PipelineManifest, name: str, note: str) -> None:
+    """Resource contention is not a failure: the work never started and stays resumable."""
+    manifest.stages[name] = StageState(status="blocked", note=note, retryable=True)
+
+
+DEPLOYMENT_LOCK_NAME = ".deployment.lock"
+DEPLOYMENT_LOCK_WAIT_SECONDS = 30.0
+
+
+@contextlib.contextmanager
+def deployment_lock(root: Path, timeout_seconds: float = DEPLOYMENT_LOCK_WAIT_SECONDS):
+    """Serialize expensive work across *different* meetings sharing one deployment root.
+
+    The per-meeting lock only stops two runs of the same meeting. On a single Mac the
+    transcription model and the reasoning server compete for the same unified memory, so
+    two meetings — CLI and web, or two CLI shells — must not decode at once.
+    """
+    lock_path = Path(root) / DEPLOYMENT_LOCK_NAME
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + max(0.0, timeout_seconds)
+    with lock_path.open("a+") as handle:
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError as exc:
+                if time.monotonic() >= deadline:
+                    raise PipelineBusyError(
+                        "another meeting is already using the models on this deployment; "
+                        f"waited {max(0.0, timeout_seconds):.0f}s. Wait for it to finish, "
+                        "then resume this meeting."
+                    ) from exc
+                # Poll instead of blocking flock, so the wait stays bounded.
+                time.sleep(0.25)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 @contextlib.contextmanager

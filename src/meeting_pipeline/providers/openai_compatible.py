@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 from typing import Any, TypeVar
@@ -11,10 +12,18 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from ..config import ReasoningSettings
-from ..errors import ProviderError, SchemaRepairError
+from ..errors import ContextBudgetError, ProviderError, SchemaRepairError
 from .base import Usage
 
 T = TypeVar("T", bound=BaseModel)
+
+# Chat templates add role markers and control tokens the character estimate cannot see.
+CHAT_TEMPLATE_OVERHEAD_TOKENS = 256
+
+
+def estimate_tokens(text: str, chars_per_token: float) -> int:
+    """Conservative character-ratio estimate; no tokenizer is installed for the local model."""
+    return math.ceil(len(text) / chars_per_token)
 
 
 def _strip_fence(text: str) -> str:
@@ -41,6 +50,23 @@ class OpenAICompatibleProvider:
     def last_usage(self) -> Usage:
         return self._last_usage
 
+    def _check_context_budget(self, parts: list[str], schema_name: str) -> None:
+        """Refuse an overflowing request before the network, instead of truncating evidence."""
+        settings = self.settings
+        estimated = sum(estimate_tokens(part, settings.chars_per_token) for part in parts)
+        available = (
+            settings.context_window - settings.max_output_tokens - CHAT_TEMPLATE_OVERHEAD_TOKENS
+        )
+        if estimated > available:
+            raise ContextBudgetError(
+                f"the {schema_name} request needs about {estimated} input tokens but only "
+                f"{available} fit: context_window={settings.context_window} minus "
+                f"max_output_tokens={settings.max_output_tokens} minus "
+                f"{CHAT_TEMPLATE_OVERHEAD_TOKENS} tokens of chat-template overhead. "
+                "Shorten the previous acta, lower chunking.target_tokens, or raise "
+                "reasoning.context_window; nothing was truncated."
+            )
+
     def complete_json(
         self,
         messages: list[dict[str, str]],
@@ -55,6 +81,9 @@ class OpenAICompatibleProvider:
         schema_instruction = (
             "Return exactly one JSON object conforming to this JSON Schema; no markdown: "
             + json.dumps(schema, ensure_ascii=False, separators=(",", ":"))
+        )
+        self._check_context_budget(
+            [schema_instruction, *(message["content"] for message in messages)], schema_name
         )
         payload = {
             "model": self.settings.model,
@@ -103,10 +132,14 @@ class OpenAICompatibleProvider:
 
     def generate_typed(self, messages: list[dict[str, str]], model_type: type[T]) -> T:
         schema = model_type.model_json_schema()
+        name = model_type.__name__
         first_error: Exception | None = None
         try:
-            data = self.complete_json(messages, schema)
+            data = self.complete_json(messages, schema, schema_name=name)
             return model_type.model_validate(data)
+        except ContextBudgetError:
+            # A prompt that does not fit will not fit on the repair attempt either.
+            raise
         except (ProviderError, ValidationError) as exc:
             first_error = exc
         repair = [
@@ -121,8 +154,10 @@ class OpenAICompatibleProvider:
             },
         ]
         try:
-            result = model_type.model_validate(self.complete_json(repair, schema))
+            result = model_type.model_validate(self.complete_json(repair, schema, schema_name=name))
             self._last_usage.repaired = True
             return result
+        except ContextBudgetError:
+            raise
         except (ProviderError, ValidationError) as exc:
             raise SchemaRepairError(f"structured output failed after one repair: {exc}") from exc
