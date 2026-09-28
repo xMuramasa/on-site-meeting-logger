@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { LiveAudioDiagnostics, liveAudioWarning } from "./audioDiagnostics";
 import { audioWarning, recordingExtension } from "./lib";
 import { startRecovery } from "./recordingRecovery";
 import { discardRecording, listRecordings, recoverRecording, type RecordingSession } from "./recordingStore";
@@ -42,6 +43,7 @@ export function useRecorder() {
   const audioContext = useRef<AudioContext | null>(null);
   const timer = useRef<number | null>(null);
   const frame = useRef<number | null>(null);
+  const diagnostics = useRef(new LiveAudioDiagnostics());
   const peak = useRef(0);
   const session = useRef(0);
 
@@ -103,6 +105,7 @@ export function useRecorder() {
     setSavedSeconds(0);
     setFile(null);
     setSessionId(null);
+    diagnostics.current = new LiveAudioDiagnostics();
     peak.current = 0;
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("Este navegador no permite grabar con micrófono.");
@@ -162,12 +165,15 @@ export function useRecorder() {
       const analyser = context.createAnalyser();
       analyser.fftSize = 256;
       context.createMediaStreamSource(media).connect(analyser);
-      const values = new Uint8Array(analyser.frequencyBinCount);
+      const values = new Uint8Array(analyser.fftSize);
       const sample = () => {
-        analyser.getByteFrequencyData(values);
-        const nextLevel = values.reduce((sum, value) => sum + value, 0) / values.length / 255;
+        analyser.getByteTimeDomainData(values);
+        const nextLevel = values.reduce((highest, value) => Math.max(highest, Math.abs(value - 128) / 127), 0);
         peak.current = Math.max(peak.current, nextLevel);
         setLevel(nextLevel);
+        const condition = diagnostics.current.observe(nextLevel, performance.now());
+        if (condition === "normal") setWarning("");
+        if (condition === "silence" || condition === "clipping") setWarning(liveAudioWarning(condition));
         frame.current = requestAnimationFrame(sample);
       };
       sample();
