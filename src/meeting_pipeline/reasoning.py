@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
@@ -13,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .chunking import merge_evidence_ranges
 from .config import Settings
 from .errors import ProviderError
-from .manifest import write_json_atomic, write_text_atomic
+from .manifest import fingerprint, write_json_atomic, write_text_atomic
 from .models import CanonicalActa, EvidenceRange, Transcript, evidence_label
 from .providers.base import ReasoningProvider
 from .resources import resource
@@ -181,6 +182,9 @@ def generate_acta_draft(
     settings: Settings,
     provider: ReasoningProvider,
     fixed_meeting: dict | None = None,
+    checkpoint_dir: Path | None = None,
+    check_cancelled: Callable[[], None] = lambda: None,
+    progress: Callable[[str, int, int], None] = lambda phase, done, total: None,
 ) -> tuple[CanonicalActa, list[ChunkExtraction]]:
     if not chunks:
         raise ProviderError("cannot draft an acta from an empty transcript")
@@ -195,7 +199,9 @@ def generate_acta_draft(
     previous_text = neutralize_untrusted_delimiters(str(prior.get("text", "")))
 
     extractions: list[ChunkExtraction] = []
+    progress("extract", 0, len(chunks))
     for chunk in chunks:
+        check_cancelled()
         prompt = render_prompt(
             "extract-chunk",
             GLOSSARY=glossary,
@@ -207,22 +213,37 @@ def generate_acta_draft(
             CHUNK_END=f"{float(chunk['end']):.2f}",
             CHUNK_TEXT=neutralize_untrusted_delimiters(str(chunk["text"])),
         )
-        extraction = provider.generate_typed(
-            [
-                {"role": "system", "content": EXTRACTION_SYSTEM},
-                {"role": "user", "content": prompt},
-            ],
-            ChunkExtraction,
+        cache_key = fingerprint(
+            "extraction-v1",
+            EXTRACTION_SYSTEM,
+            prompt,
+            ChunkExtraction.model_json_schema(),
+            settings.reasoning.model_dump(mode="json", exclude={"base_url", "api_key_env"}),
+            transcript.model_dump(mode="json"),
+            (fixed_meeting or {}).get("recording_sha256"),
         )
-        if extraction.chunk_id != chunk["id"]:
-            raise ProviderError(
-                f"model returned chunk_id {extraction.chunk_id}, expected {chunk['id']}"
+        cache_path = checkpoint_dir / f"{cache_key}.json" if checkpoint_dir else None
+        extraction = None
+        if cache_path and cache_path.is_file():
+            try:
+                extraction = ChunkExtraction.model_validate_json(cache_path.read_text())
+                _validate_extraction(extraction, chunk)
+            except (ValueError, OSError, ProviderError):
+                extraction = None
+        if extraction is None:
+            extraction = provider.generate_typed(
+                [
+                    {"role": "system", "content": EXTRACTION_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                ChunkExtraction,
             )
-        start, end = float(chunk["start"]), float(chunk["end"])
-        for fact in extraction.facts:
-            if any(item.start < start - 0.01 or item.end > end + 0.01 for item in fact.evidence):
-                raise ProviderError(f"chunk {chunk['id']} returned evidence outside its bounds")
+            _validate_extraction(extraction, chunk)
+            if cache_path:
+                write_json_atomic(cache_path, extraction.model_dump(mode="json"))
         extractions.append(extraction)
+        progress("extract", len(extractions), len(chunks))
+        check_cancelled()
 
     facts = deduplicate_chunk_facts([fact for item in extractions for fact in item.facts])
     meeting_values = {
@@ -264,6 +285,8 @@ def generate_acta_draft(
             )
         ),
     )
+    check_cancelled()
+    progress("consolidate", len(chunks), len(chunks))
     acta = provider.generate_typed(
         [
             {"role": "system", "content": CONSOLIDATION_SYSTEM},
@@ -281,6 +304,17 @@ def generate_acta_draft(
         raise ProviderError("draft recording filename does not match the transcript")
     acta = guard_consolidation(acta, facts, transcript.text())
     return acta, extractions
+
+
+def _validate_extraction(extraction: ChunkExtraction, chunk: dict) -> None:
+    if extraction.chunk_id != chunk["id"]:
+        raise ProviderError("cached or generated extraction has the wrong chunk id")
+    for fact in extraction.facts:
+        if any(
+            e.start < float(chunk["start"]) - 0.01 or e.end > float(chunk["end"]) + 0.01
+            for e in fact.evidence
+        ):
+            raise ProviderError("cached or generated evidence is outside its chunk")
 
 
 def render_digest(acta: CanonicalActa, extractions: list[ChunkExtraction]) -> str:

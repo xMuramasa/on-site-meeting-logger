@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from datetime import date as Date
 from pathlib import Path
+from uuid import UUID
 
 import typer
 
@@ -214,6 +215,8 @@ def process(
     output_root: Path | None = OutRootOpt,
     config: Path | None = ConfigOpt,
     force: bool = ForceOpt,
+    meeting_id: UUID | None = typer.Option(None, "--meeting-id"),
+    title: str | None = typer.Option(None, "--title"),
 ) -> None:
     """Ingest and run everything up to the review gate (stops before final rendering)."""
     from .ingest import ingest_meeting
@@ -227,6 +230,8 @@ def process(
             meeting_date=meeting_date,
             output_root=output_root,
             force=force,
+            meeting_id=meeting_id,
+            title=title,
         )
         result = run_stages(meeting_dir, until="generate_review", config_path=config, force=force)
     except ValueError as exc:

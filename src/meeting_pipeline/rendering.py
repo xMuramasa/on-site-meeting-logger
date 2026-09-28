@@ -75,7 +75,8 @@ def _context(acta: CanonicalActa, branding: BrandingSettings) -> dict:
 
 
 def artifact_stem(acta: CanonicalActa, branding: BrandingSettings) -> str:
-    return f"{branding.filename_prefix}_{acta.meeting.date.isoformat()}"
+    suffix = f"_{str(acta.meeting.meeting_id)[:8]}" if acta.meeting.meeting_id else ""
+    return f"{branding.filename_prefix}_{acta.meeting.date.isoformat()}{suffix}"
 
 
 def render_markdown(acta: CanonicalActa, branding: BrandingSettings | None = None) -> str:

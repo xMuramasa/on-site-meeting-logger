@@ -1,3 +1,22 @@
+export type Evidence = { start: number; end: number; segment_ids: number[] };
+export type ContentEdit = {
+  kind: "paragraph" | "action" | "decision" | "proposal" | "risk" | "question";
+  target: string; remove?: boolean; text?: string; evidence?: Evidence[];
+  acceptance?: string; dependencies?: string[]; owner?: string | null; due_date?: string | null;
+  clear_owner?: boolean; clear_due_date?: boolean;
+};
+export type Claim = { id: string; statement?: string; question?: string; text?: string; outcome?: string;
+  evidence: Evidence[]; owner?: string | null; due_date?: string | null; acceptance?: string; dependencies?: string[] };
+export type Draft = {
+  meeting: { title: string }; participants: { name: string }[]; participants_note: string;
+  continuity_note?: string; sources_note: string;
+  sections: { title: string; paragraphs: Claim[]; actions: Claim[] }[];
+  decisions: Claim[]; proposals: Claim[]; risks: Claim[]; open_questions: Claim[];
+  prior_follow_ups: { item: string; detail: string; evidence: Evidence[] }[];
+  quality_warnings: { note: string }[];
+};
+export type Transcript = { segments: { id: number; start: number; end: number; text: string }[];
+  low_confidence_ranges: Evidence[]; degraded_ranges: Evidence[] };
 export type ReviewParticipant = { name: string; email: string | null; attended: boolean | null };
 export type RelativeDateReview = {
   action_id: string;
@@ -6,6 +25,8 @@ export type RelativeDateReview = {
   resolved_date: string | null;
 };
 export type Review = {
+  draft_hash?: string | null;
+  content_edits?: ContentEdit[];
   participants: ReviewParticipant[];
   proper_nouns: Record<string, string>;
   owners: Record<string, string>;
@@ -18,6 +39,9 @@ export type Job = {
   // "blocked" means another meeting holds the local models — a wait, not a failure.
   status: "running" | "complete" | "failed" | "cancelled" | "blocked";
   stage: string;
+  phase?: string;
+  completed_chunks?: number;
+  total_chunks?: number;
   error_code?: FailureCode;
   retryable?: boolean;
 };
@@ -29,12 +53,17 @@ export type AudioAnalysis = {
 
 };
 export type MeetingSummary = {
+  id?: string;
+  title?: string;
   date: string;
   source: string;
   stages: Record<string, string>;
   job: Job | null;
 };
 export type MeetingDetail = {
+  id?: string;
+  title?: string;
+  review_error?: string | null;
   date: string;
   job: Job | null;
   audio_analysis: AudioAnalysis | null;
@@ -64,7 +93,7 @@ let csrfToken = "";
 async function parse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(body.detail || `Request failed (${response.status})`);
+    throw new Error(typeof body.detail === "string" ? body.detail : body.detail ? JSON.stringify(body.detail) : `Request failed (${response.status})`);
   }
   return response.json() as Promise<T>;
 }
@@ -95,12 +124,14 @@ export async function meeting(date: string): Promise<MeetingDetail> {
   return request(`/api/meetings/${date}`);
 }
 
-export async function uploadMeeting(date: string, audio: File, previous?: File): Promise<void> {
+export async function uploadMeeting(date: string, audio: File, previous?: File, id?: string, title?: string): Promise<{ id: string }> {
   const body = new FormData();
   body.append("meeting_date", date);
   body.append("audio", audio);
+  if (id) body.append("meeting_id", id);
+  if (title) body.append("title", title);
   if (previous) body.append("previous_acta", previous);
-  await request("/api/meetings", {
+  return request("/api/meetings", {
     method: "POST",
     headers: { "X-CSRF-Token": csrfToken },
     body,
@@ -134,4 +165,15 @@ export async function restart(date: string): Promise<void> {
     method: "POST",
     headers: { "X-CSRF-Token": csrfToken },
   });
+}
+
+export function getDraft(id: string): Promise<{ draft: Draft; draft_hash: string }> {
+  return request(`/api/meetings/${id}/draft`);
+}
+export function getTranscript(id: string): Promise<Transcript> {
+  return request(`/api/meetings/${id}/transcript`);
+}
+export function previewReview(id: string, review: Review): Promise<Draft> {
+  return request(`/api/meetings/${id}/review-preview`, { method: "POST",
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }, body: JSON.stringify(review) });
 }

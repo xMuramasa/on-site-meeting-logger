@@ -6,6 +6,11 @@ content. Two local models are involved — MLX Whisper for transcription and a l
 
 Profile: `config/mac-mini.yaml`.
 
+For automatic dependency setup, run `make install` from the checkout (`make install DEV=1`
+also installs development tools). It selects this profile on Apple Silicon and prints the
+startup and SSH commands. See [installation details](installation.md). The manual steps below
+remain available when managing dependencies yourself.
+
 ## 1. System dependencies
 
     brew install ffmpeg llama.cpp

@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
-    "test": "vitest run"
+    "test": "vitest run src",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "lucide-react": "^0.544.0",
@@ -15,10 +16,12 @@
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4.1.13",
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.3",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "^27.0.0",
     "tailwindcss": "^4.1.13",
     "typescript": "^5.9.2",

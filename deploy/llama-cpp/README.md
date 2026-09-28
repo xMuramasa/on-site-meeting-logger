@@ -17,7 +17,11 @@ Start the server manually when processing a meeting:
       --host 127.0.0.1 \
       --port 8080 \
       --ctx-size 32768 \
-      --jinja
+      --parallel 1 \
+      --cache-ram 0 \
+      --alias Qwen/Qwen3-8B-GGUF \
+      --jinja \
+      --chat-template-kwargs '{"enable_thinking":false}'
 
 The first invocation downloads about 5 GB. The pipeline never starts this server
 by itself. Check readiness:

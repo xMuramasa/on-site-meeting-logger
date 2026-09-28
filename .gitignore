@@ -28,3 +28,6 @@ webui/node_modules/
 webui/*.tsbuildinfo
 webui/vite.config.js
 webui/vite.config.d.ts
+
+webui/test-results/
+webui/playwright-report/

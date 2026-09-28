@@ -21,25 +21,43 @@ and unknown owners or dates stay unresolved until review.
 
 ## Install
 
-    cd /Users/muramasa/Github/Personal/meeting-pipeline
-    uv sync --extra stt
+On macOS, install [Homebrew](https://brew.sh) and follow its shell PATH instructions, then run
+from this checkout:
 
-On a Mac mini / Apple Silicon, `uv sync --extra stt-mlx` installs the MLX Whisper backend
-instead; see `docs/native-mac-mini.md` and `config/mac-mini.yaml`. `faster-whisper` stays the
-default and the cross-platform fallback.
+    make install
+
+This installs missing system tools and locked Python dependencies in `.venv`, selecting MLX
+Whisper on Apple Silicon or faster-whisper on Intel. It reuses an existing Chromium browser or
+installs Chrome for PDF export. Normal installation uses the bundled frontend and requires no
+Bun or Node.js. Python 3.12 is downloaded by uv if needed.
+
+For development tools and a fresh frontend build:
+
+    make install DEV=1
+
+The installer can be rerun without overwriting configuration or recordings. It prints startup
+commands for the detected platform and instructions for connecting from another computer.
+See [installation details](docs/installation.md) for prerequisites and verification limits.
+
+For manual installation on other platforms, install Python 3.11+, uv, ffmpeg/ffprobe, a
+Chromium browser, and a reasoning endpoint, then run `uv sync --extra stt`. On Apple Silicon,
+the equivalent Python-only command is `uv sync --extra stt-mlx`.
 
 ## Start the local reasoning model
 
-Follow `deploy/llama-cpp/README.md`. The server is deliberately not started by the pipeline.
+Use the commands printed by the installer. On Apple Silicon, keep these running in separate
+terminals:
 
-The shortest setup uses the Makefile:
+    make model MODEL_CONTEXT=16384
+    make ui CONFIG=config/mac-mini.yaml OUTPUT_ROOT="$HOME/MeetingWork"
 
-    make setup
-
-Then keep these running in separate terminals:
+On Intel, use the local profile and 32K model context:
 
     make model
-    make ui
+    make ui OUTPUT_ROOT="$HOME/MeetingWork"
+
+The pipeline never starts the model server itself. Model weights download on first use. See
+[the Mac mini guide](docs/native-mac-mini.md) or [llama.cpp setup](deploy/llama-cpp/README.md).
 
 Open the studio with `make open`. Run `make help` for development, test, build, and diagnostic
 targets. Paths and ports can be overridden without editing the file, for example:
@@ -60,6 +78,18 @@ Then open `http://127.0.0.1:8765`. The browser asks for microphone permission on
 is selected. The app does not capture system audio; browser/Teams/Zoom system audio requires a
 separate virtual audio device or an exported recording.
 
+To access a studio running on a Mac mini, enable Remote Login on the mini and run this on
+your client computer:
+
+    make tunnel SSH_USER=your-mini-username SERVER_IP=192.168.1.50
+
+Keep the tunnel terminal open, then open `http://127.0.0.1:8765` on the client (or run
+`make open` in another terminal). The model and studio must already be running on the mini;
+see [the Mac mini setup](docs/native-mac-mini.md). Recording uses the client's microphone,
+and downloads are saved on the client. The current pipeline also retains its working files on
+the mini. See [remote access details](docs/local-web-studio.md#access-from-another-computer)
+for custom ports.
+
 ## Process a meeting
 
     uv run meeting process \
@@ -69,6 +99,10 @@ separate virtual audio device or an exported recording.
       --output-root /Users/muramasa/Recordings \
       --config config/local-llama-cpp.yaml
 
+New meetings use `YYYY-MM-DD--UUID` folders; `process` prints the generated artifact paths.
+Reuse that directory for subsequent commands. Existing date-only meeting folders still work.
+Use `--title` to name a meeting and `--meeting-id` to explicitly resume its identity.
+
 This stops at `review.yaml`. Confirm attendance, proper nouns, owners, and dates, then set:
 
     approve_for_final_render: true
@@ -76,7 +110,7 @@ This stops at `review.yaml`. Confirm attendance, proper nouns, owners, and dates
 Finalize:
 
     uv run meeting finalize \
-      --meeting-dir /Users/muramasa/Recordings/2026-09-07 \
+      --meeting-dir /path/to/meeting-directory \
       --config config/local-llama-cpp.yaml
 
 Finalization renders Markdown and HTML, exports the PDF, and refuses completion if validation fails.
@@ -102,7 +136,7 @@ artifacts, not repository content. Keep the output root outside this checkout (t
 The repository ignores common recording formats and the `meeting-artifacts/` and `recordings/`
 directories as a backstop. Run `make hygiene` before staging changes; it fails if a recording, a
 known generated meeting file such as `transcript.md`, or a file under either artifact directory is
-tracked. It also rejects files under the pipeline's `YYYY-MM-DD` meeting directories. The check is
+tracked. It also rejects files under the pipeline's legacy and UUID meeting directories. The check is
 read-only and never deletes files.
 
 ## Useful commands
@@ -126,3 +160,6 @@ See:
 - `docs/privacy-and-retention.md`
 - `docs/model-evaluation.md`
 - `docs/local-web-studio.md`
+
+See [recording recovery and evidence review](docs/studio-reliability.md) for browser-local
+recovery, same-day meetings, extraction checkpoints, and browser/release checks.

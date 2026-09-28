@@ -61,6 +61,29 @@ def _overlap_count(lines: list[tuple[int, int, str, pymupdf.Rect]]) -> int:
     return overlaps
 
 
+def _empty_document_table_cells(table: list[list[str | None]]) -> int:
+    """Inspect actual document tables, not merged rectangles from page decoration.
+
+    Chromium's filled heading/callout backgrounds can connect into one page-sized
+    pdfplumber grid. Its merged-cell placeholders are not missing participant data.
+    Our templates have two known table headers; inspect the contiguous grid beneath
+    those headers, stopping at the next merged full-width decorative row.
+    """
+    headers = {("Participante", "Correo", "Asistencia"), ("Compromiso", "Estado", "Detalle")}
+    active = False
+    missing = 0
+    for row in table:
+        cells = tuple(cell.strip() if cell is not None else None for cell in row)
+        if cells in headers:
+            active = True
+        elif active:
+            if len(cells) != 3 or sum(cell is not None for cell in cells) <= 1:
+                active = False
+            else:
+                missing += sum(not cell for cell in cells)
+    return missing
+
+
 def _write_contact_sheet(document: pymupdf.Document, dpi: int, output_path: Path) -> None:
     thumbnails: list[Image.Image] = []
     scale = dpi / 72
@@ -109,16 +132,13 @@ def validate_pdf_visuals(
         with pdfplumber.open(path) as pdf_document:
             for page in pdf_document.pages:
                 for table in page.extract_tables():
-                    broken_tables += sum(
-                        cell is None or not cell.strip() for row in table for cell in row
-                    )
+                    broken_tables += _empty_document_table_cells(table)
         checks = [
             CheckResult(
                 name="visual-rasterization",
                 ok=True,
                 detail=(
-                    f"pages={len(ink_ratios)}; dpi={settings.visual_dpi}; "
-                    f"ink_ratios={ink_ratios}"
+                    f"pages={len(ink_ratios)}; dpi={settings.visual_dpi}; ink_ratios={ink_ratios}"
                 ),
             ),
             CheckResult(

@@ -10,6 +10,7 @@ export default defineConfig({
     proxy: { "/api": "http://127.0.0.1:8765" },
   },
   build: {
+    assetsInlineLimit: 0,
     outDir: "../src/meeting_pipeline/_web",
     emptyOutDir: true,
   },

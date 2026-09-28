@@ -262,7 +262,11 @@ def _run_stages(
         for name in ("extract-chunk.md", "consolidate-acta.md")
     ]
     consolidate_fp = fingerprint(
-        "consolidate-v2",
+        "consolidate-v3",
+        manifest.meeting_id,
+        manifest.title,
+        settings.meeting.model_dump(mode="json"),
+        settings.glossary.model_dump(mode="json"),
         sha256_file(chunks_path),
         sha256_file(context_path),
         settings.reasoning.model_dump(mode="json", exclude={"base_url", "api_key_env"}),
@@ -273,6 +277,8 @@ def _run_stages(
         begin(stage)
         active_provider = provider or OpenAICompatibleProvider(settings.reasoning)
         fixed_meeting = {
+            "meeting_id": str(manifest.meeting_id) if manifest.meeting_id else None,
+            "title": manifest.title or settings.meeting.title,
             "date": manifest.meeting_date.isoformat(),
             "recording_filename": manifest.source_filename,
             "recording_sha256": manifest.source_sha256,
@@ -283,6 +289,18 @@ def _run_stages(
             if manifest.previous_acta_date
             else None,
         }
+
+        def check_cancelled() -> None:
+            if (build / ".cancel-requested").is_file():
+                raise PipelineCancelled("cancellation requested")
+
+        def progress(phase: str, done: int, total: int) -> None:
+            state = manifest.stage("consolidate")
+            state.phase = phase
+            state.completed_chunks = done
+            state.total_chunks = total
+            write_manifest(manifest_path, manifest)
+
         acta, extractions = generate_acta_draft(
             transcript,
             chunks,
@@ -290,6 +308,9 @@ def _run_stages(
             settings,
             active_provider,
             fixed_meeting=fixed_meeting,
+            checkpoint_dir=build / "extraction-checkpoints",
+            check_cancelled=check_cancelled,
+            progress=progress,
         )
         usage = getattr(active_provider, "last_usage", None)
         usage_data = usage.model_dump(mode="json") if usage is not None else {}
@@ -325,7 +346,7 @@ def _run_stages(
 
     # document rendering
     stage = "render"
-    template_dir = Path(__file__).resolve().parents[2] / "templates"
+    template_dir = resource("templates")
     render_fp = fingerprint(
         "render-v2",
         sha256_file(approved_path),
@@ -390,7 +411,6 @@ def _fail_with_diagnostic(manifest: Any, stage: str, exc: Exception) -> None:
     )
 
 
-
 def request_cancellation(meeting_dir: Path) -> None:
     """Persist a cooperative cancellation request without contending for the active run lock."""
     meeting_dir = Path(meeting_dir).expanduser().resolve()
@@ -445,11 +465,7 @@ def run_stages(
             if manifest_path.is_file():
                 manifest = load_manifest(manifest_path)
                 running = next(
-                    (
-                        name
-                        for name, state in manifest.stages.items()
-                        if state.status == "running"
-                    ),
+                    (name for name, state in manifest.stages.items() if state.status == "running"),
                     None,
                 )
                 if running:

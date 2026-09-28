@@ -21,11 +21,16 @@ def test_model_target_is_loopback_only_and_uses_official_gguf():
     assert "Qwen/Qwen3-8B-GGUF" in output
     assert "Qwen3-8B-Q4_K_M.gguf" in output
     assert "--host 127.0.0.1" in output
+    assert "--alias Qwen/Qwen3-8B-GGUF" in output
+    assert "--parallel 1" in output
+    assert "--cache-ram 0" in output
+    assert '\'{"enable_thinking":false}\'' in output
 
 
 def test_ui_target_uses_local_profile_and_recordings_directory():
     output = make("ui")
     assert "meeting serve" in output
+    assert "uv run --no-dev" in output
     assert "--output-root /Users/muramasa/Recordings" in output
     assert "--config config/local-llama-cpp.yaml" in output
 

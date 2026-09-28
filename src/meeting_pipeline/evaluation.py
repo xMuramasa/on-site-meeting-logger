@@ -31,8 +31,17 @@ class EvaluationReport(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    citation_precision: float = Field(ge=0.0, le=1.0)
-    unsupported_claims: int = Field(ge=0)
+    report_version: int = 2
+    matching_method: str = "normalized_exact_text"
+    citation_precision: float | None = Field(default=None, ge=0.0, le=1.0)
+    generated_claims: int = Field(ge=0)
+    reference_claims: int = Field(ge=0)
+    lexical_matches: int = Field(ge=0)
+    unmatched_generated_claims: int = Field(ge=0)
+    unmatched_reference_decisions: int = Field(ge=0)
+    unmatched_reference_actions: int = Field(ge=0)
+    lexical_decision_recall: float | None = Field(default=None, ge=0, le=1)
+    lexical_action_recall: float | None = Field(default=None, ge=0, le=1)
     decision_as_proposal_errors: int = Field(ge=0)
     proposal_as_decision_errors: int = Field(ge=0)
     schema_repairs: int = Field(ge=0)
@@ -145,6 +154,8 @@ def evaluate_reviewed_meeting(
         settings,
         active_provider,
         fixed_meeting={
+            "meeting_id": str(manifest.meeting_id) if manifest.meeting_id else None,
+            "title": manifest.title or settings.meeting.title,
             "date": manifest.meeting_date.isoformat(),
             "recording_filename": manifest.source_filename,
             "recording_sha256": manifest.source_sha256,
@@ -158,32 +169,8 @@ def evaluate_reviewed_meeting(
     )
     runtime_seconds = time.perf_counter() - started
 
-    reference_by_text: dict[str, list[_Claim]] = {}
-    for claim in _claims(approved):
-        reference_by_text.setdefault(_normalize(claim.text), []).append(claim)
-    generated = _claims(replay)
-    matched = [claim for claim in generated if _normalize(claim.text) in reference_by_text]
-    cited = []
-    for claim in matched:
-        references = reference_by_text[_normalize(claim.text)]
-        if any(_evidence_overlaps(claim.evidence, reference.evidence) for reference in references):
-            cited.append(claim)
-    proposal_texts = {_normalize(item.statement) for item in approved.proposals}
-    decision_texts = {_normalize(item.statement) for item in approved.decisions}
-
     report = EvaluationReport(
-        citation_precision=len(cited) / len(matched) if matched else 1.0,
-        unsupported_claims=len(generated) - len(matched),
-        decision_as_proposal_errors=sum(
-            _normalize(item.statement) in proposal_texts
-            and _normalize(item.statement) not in decision_texts
-            for item in replay.decisions
-        ),
-        proposal_as_decision_errors=sum(
-            _normalize(item.statement) in decision_texts
-            and _normalize(item.statement) not in proposal_texts
-            for item in replay.proposals
-        ),
+        **score_claims(replay, approved),
         schema_repairs=active_provider.schema_repairs,
         human_corrections=_count_human_corrections(
             draft.model_dump(mode="json"), approved.model_dump(mode="json")
@@ -193,3 +180,49 @@ def evaluate_reviewed_meeting(
         model_calls=active_provider.calls,
     )
     return write_json_atomic(build / "evaluation-report.json", report.model_dump(mode="json"))
+
+
+def score_claims(replay: CanonicalActa, approved: CanonicalActa) -> dict[str, Any]:
+    """One-to-one lexical alignment; unmatched wording is not a semantic verdict."""
+    reference = _claims(approved)
+    generated = _claims(replay)
+    available = set(range(len(reference)))
+    pairs = []
+    for claim in generated:
+        candidates = [
+            i for i in available if _normalize(reference[i].text) == _normalize(claim.text)
+        ]
+        if not candidates:
+            continue
+        index = max(
+            candidates,
+            key=lambda i: (
+                reference[i].kind == claim.kind,
+                _evidence_overlaps(claim.evidence, reference[i].evidence),
+                -i,
+            ),
+        )
+        available.remove(index)
+        pairs.append((claim, reference[index]))
+    cited = sum(_evidence_overlaps(a.evidence, b.evidence) for a, b in pairs)
+    counts = {kind: sum(c.kind == kind for c in reference) for kind in ("decision", "action")}
+    covered = {kind: sum(a.kind == b.kind == kind for a, b in pairs) for kind in counts}
+    return {
+        "citation_precision": cited / len(pairs) if pairs else None,
+        "generated_claims": len(generated),
+        "reference_claims": len(reference),
+        "lexical_matches": len(pairs),
+        "unmatched_generated_claims": len(generated) - len(pairs),
+        "unmatched_reference_decisions": counts["decision"] - covered["decision"],
+        "unmatched_reference_actions": counts["action"] - covered["action"],
+        "lexical_decision_recall": covered["decision"] / counts["decision"]
+        if counts["decision"]
+        else None,
+        "lexical_action_recall": covered["action"] / counts["action"] if counts["action"] else None,
+        "decision_as_proposal_errors": sum(
+            a.kind == "proposal" and b.kind == "decision" for a, b in pairs
+        ),
+        "proposal_as_decision_errors": sum(
+            a.kind == "decision" and b.kind == "proposal" for a, b in pairs
+        ),
+    }

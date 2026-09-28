@@ -2,7 +2,9 @@
 
 1. Obtain participant consent and record one complete `.m4a`, `.wav`, or `.mp3` file.
 2. Start the configured reasoning endpoint. For local operation, use the llama.cpp runbook.
-3. Run `meeting process` with the meeting date and optional previous acta.
+3. Run `meeting process` with the meeting date and optional previous acta. Use the generated
+   `YYYY-MM-DD--UUID` directory printed in the output for the remaining commands. Legacy date-only
+   directories remain valid.
 4. Inspect `transcript.md`, especially ranges listed as low confidence.
 5. Edit `review.yaml`:
    - set each participant's `attended` to true, false, or leave null;

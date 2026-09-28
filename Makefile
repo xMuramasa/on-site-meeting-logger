@@ -12,7 +12,7 @@ MODEL_FILE ?= Qwen3-8B-Q4_K_M.gguf
 MODEL_PORT ?= 8080
 MODEL_CONTEXT ?= 32768
 
-.PHONY: help install setup model output-dir ui open tunnel frontend-install frontend-dev frontend-build test lint hygiene check build doctor
+.PHONY: help install setup model output-dir ui open tunnel frontend-install frontend-dev frontend-build browser-test test lint hygiene check build doctor
 
 help: ## Show available commands
 	@printf "Meeting Pipeline\n\n"
@@ -96,3 +96,6 @@ build: frontend-build ## Build the Python wheel and source archive
 
 doctor: ## Check required local executables
 	uv run --no-dev meeting doctor --output-root $(OUTPUT_ROOT) --config $(CONFIG)
+
+browser-test: frontend-build ## Run real browser workflows (requires Playwright Chromium and WebKit)
+	cd webui && bun run test:browser

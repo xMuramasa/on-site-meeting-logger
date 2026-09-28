@@ -5,9 +5,11 @@ from __future__ import annotations
 import shutil
 from datetime import date
 from pathlib import Path
+from uuid import UUID, uuid4
 
 from .errors import IngestError
-from .manifest import create_manifest, load_manifest, sha256_file, write_manifest
+from .manifest import create_manifest, load_manifest, meeting_lock, sha256_file, write_manifest
+from .meetings import meeting_records
 from .previous_context import (
     SUPPORTED_PREVIOUS_ACTA,
     canonical_acta_from_json,
@@ -40,6 +42,8 @@ def ingest_meeting(
     meeting_date: date,
     output_root: Path | None = None,
     force: bool = False,
+    meeting_id: UUID | None = None,
+    title: str | None = None,
 ) -> Path:
     del force  # Source immutability is never bypassed.
     audio = Path(audio).expanduser().resolve()
@@ -70,7 +74,45 @@ def ingest_meeting(
         )
     else:
         root = Path(output_root).expanduser().resolve()
-    meeting_dir = root / meeting_date.isoformat()
+    root.mkdir(parents=True, exist_ok=True)
+    with meeting_lock(root / ".ingest"):
+        records = meeting_records(root)
+        source_hash = sha256_file(audio)
+        prior_hash = sha256_file(prior) if prior else None
+        if meeting_id is not None:
+            matches = [(p, m) for p, m in records if m.meeting_id == meeting_id]
+            if matches:
+                path, existing = matches[0]
+                if (
+                    existing.meeting_date != meeting_date
+                    or existing.source_sha256 != source_hash
+                    or existing.previous_acta_sha256 != prior_hash
+                    or (title is not None and existing.title != title)
+                ):
+                    raise IngestError("meeting identifier describes different source or metadata")
+                return path
+        else:
+            matches = [
+                (p, m)
+                for p, m in records
+                if m.meeting_date == meeting_date
+                and m.source_sha256 == source_hash
+                and m.previous_acta_sha256 == prior_hash
+            ]
+            if len(matches) > 1:
+                raise IngestError("multiple matching meetings; specify --meeting-id")
+            if matches:
+                return matches[0][0]
+        identity = meeting_id or uuid4()
+        meeting_dir = root / f"{meeting_date.isoformat()}--{identity}"
+        return _ingest_sources(
+            audio, prior, prior_format, prior_date, meeting_date, meeting_dir, identity, title
+        )
+
+
+def _ingest_sources(
+    audio, prior, prior_format, prior_date, meeting_date, meeting_dir, identity, title
+):
     source_dir = meeting_dir / "source"
     build_dir = meeting_dir / "build"
     build_dir.mkdir(parents=True, exist_ok=True)
@@ -107,5 +149,7 @@ def ingest_meeting(
             previous_acta_format=prior_format,
             previous_acta_date=prior_date,
         )
+        manifest.meeting_id = identity
+        manifest.title = title
         write_manifest(manifest_path, manifest)
     return meeting_dir

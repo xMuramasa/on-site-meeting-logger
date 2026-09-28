@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { audioWarning, recordingExtension } from "./lib";
+import { startRecovery } from "./recordingRecovery";
+import { discardRecording, listRecordings, recoverRecording, type RecordingSession } from "./recordingStore";
 
 export type AudioInput = Pick<MediaDeviceInfo, "deviceId" | "label">;
 
@@ -16,6 +18,15 @@ export function recorderErrorMessage(reason: unknown) {
 }
 
 export function useRecorder() {
+  const [starting, setStarting] = useState(false);
+  const startingRef = useRef(false);
+  const [savedSeconds, setSavedSeconds] = useState(0);
+  const [sessions, setSessions] = useState<RecordingSession[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [stopping, setStopping] = useState(false);
+  const recovery = useRef<Awaited<ReturnType<typeof startRecovery>> | null>(null);
+  const refreshSessions = useCallback(() => { void listRecordings().then(setSessions).catch(() => {}); }, []);
+  useEffect(refreshSessions, [refreshSessions]);
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [level, setLevel] = useState(0);
@@ -80,13 +91,18 @@ export function useRecorder() {
   }, [refreshInputs]);
 
   const start = async () => {
+    if (startingRef.current || recording || stopping) return;
+    startingRef.current = true;
+    setStarting(true);
     const currentSession = session.current + 1;
     session.current = currentSession;
     if (recorder.current?.state === "recording") recorder.current.stop();
     cleanup();
     setError("");
     setWarning("");
+    setSavedSeconds(0);
     setFile(null);
+    setSessionId(null);
     peak.current = 0;
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("Este navegador no permite grabar con micrófono.");
@@ -116,18 +132,33 @@ export function useRecorder() {
         setRecording(false);
         setError("La grabación se interrumpió. Revisa el micrófono y vuelve a intentarlo.");
       };
-      instance.onstop = () => {
+      instance.onstop = async () => {
         if (session.current !== currentSession) return;
         const actualType = instance.mimeType || mimeType || "audio/webm";
         const blob = new Blob(chunks, { type: actualType });
-        setFile(new File([blob], `grabacion.${recordingExtension(actualType)}`, { type: actualType }));
+        setStopping(true);
+        const completedFile = new File([blob], `grabacion.${recordingExtension(actualType)}`, { type: actualType });
+        try { await recovery.current?.complete(completedFile); }
+        catch { setError(current => current || "No se pudo guardar la grabación completa. Descarga el audio disponible."); }
+        if (session.current !== currentSession) return;
+        setFile(completedFile);
         setWarning(audioWarning(peak.current <= 0.01 ? "silent" : peak.current <= 0.04 ? "quiet" : "normal") || "");
         cleanup();
         recorder.current = null;
         setRecording(false);
+        setStopping(false);
+        refreshSessions();
       };
       const context = new AudioContext();
       audioContext.current = context;
+      recovery.current = await startRecovery(context, media, setSavedSeconds, () => {
+        setError("El guardado local falló. La grabación se detuvo; descarga el audio disponible.");
+        if (instance.state === "recording") { setStopping(true); instance.stop(); }
+      });
+      if (session.current !== currentSession) { await recovery.current.finish(); cleanup(); return; }
+      setSessionId(recovery.current.session.id);
+      if (!recovery.current.session.persistent) setWarning("El navegador no garantizó almacenamiento persistente. Descarga la grabación al terminar.");
+      await context.resume();
       const analyser = context.createAnalyser();
       analyser.fftSize = 256;
       context.createMediaStreamSource(media).connect(analyser);
@@ -146,15 +177,23 @@ export function useRecorder() {
       setRecording(true);
     } catch (reason) {
       cleanup();
-      if (session.current === currentSession) setError(recorderErrorMessage(reason));
+      if (session.current === currentSession) {
+        setError(recorderErrorMessage(reason));
+        refreshSessions();
+      }
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
     }
   };
 
   const stop = () => {
-    if (recorder.current?.state === "recording") recorder.current.stop();
-    setRecording(false);
+    if (recorder.current?.state === "recording") { setStopping(true); recorder.current.stop(); }
   };
   const discard = () => {
+    if (recording || stopping) return;
+    if (sessionId) void discardRecording(sessionId).then(refreshSessions).catch(() => setError("No se pudo descartar la grabación"));
+    setSessionId(null);
     session.current += 1;
     if (recorder.current?.state === "recording") recorder.current.stop();
     recorder.current = null;
@@ -172,6 +211,21 @@ export function useRecorder() {
   };
   return {
     recording, elapsed, level, file, error, warning, start, stop, discard,
+    savedSeconds, sessions, sessionId, stopping, starting,
+    async recover(id: string) {
+      try { setFile(await recoverRecording(id)); setSessionId(id); }
+      catch (reason) { setError(recorderErrorMessage(reason)); }
+    },
+    async removeSession(id: string) {
+      try { await discardRecording(id); refreshSessions(); }
+      catch { setError("No se pudo descartar la grabación. Puedes intentarlo nuevamente."); }
+    },
+    async uploaded() {
+      try { if (sessionId) await discardRecording(sessionId); }
+      catch { setWarning("La reunión se guardó en el servidor. La copia de recuperación sigue en este navegador."); }
+      setSessionId(null); setFile(null); refreshSessions();
+    },
+    detach() { if (!recording && !stopping) { setFile(null); setSessionId(null); } },
     inputs, selectedInputId, inputError, inputSupported,
     inputLabelsAvailable: inputs.some((device) => Boolean(device.label)),
     selectInput,

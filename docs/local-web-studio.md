@@ -18,6 +18,38 @@ meeting database or cloud account is introduced.
 Browser recordings use the best format exposed by MediaRecorder: M4A/MP4 where supported, then
 WebM/Opus as a fallback. ffmpeg/faster-whisper decode these formats downstream.
 
+## Access from another computer
+
+On the Mac mini, follow [the native setup guide](native-mac-mini.md), start the reasoning
+server and studio, and enable **System Settings → General → Sharing → Remote Login** for
+your account. Keep the mini awake while processing.
+
+On the client computer, run from this checkout:
+
+    make tunnel SSH_USER=your-mini-username SERVER_IP=192.168.1.50
+
+Replace the username and IP address with the mini's values. SSH handles authentication using
+your configured key or an interactive password prompt. Leave the terminal running, then open
+`http://127.0.0.1:8765` or run `make open` in another terminal. Press Ctrl+C to close the tunnel.
+The target forwards the client's loopback port to the studio's loopback port on the mini; it
+does not install dependencies or start the remote app.
+
+If port 8765 is occupied, use the same `PORT` on both computers so the studio's trusted Origin
+checks match the browser URL:
+
+    # On the mini, with the reasoning server already running:
+    make ui CONFIG=config/mac-mini.yaml OUTPUT_ROOT="$HOME/MeetingWork" PORT=9000
+
+    # On the client:
+    make tunnel SSH_USER=your-mini-username SERVER_IP=192.168.1.50 PORT=9000
+    # In another client terminal:
+    make open PORT=9000
+
+The browser uses the client's microphone and saves downloads on the client. The localhost URL
+supports browser microphone access through the tunnel. Uploaded audio and pipeline artifacts
+are still stored under the mini's output root; this target does not add automatic cleanup or a
+transcription-only mode.
+
 ## Local security
 
 - Uvicorn binds to `127.0.0.1`; it is not reachable from the LAN.
@@ -46,3 +78,10 @@ Vite proxies `/api` to port 8765. For a production bundle:
     bun run build
 
 The build is written to `src/meeting_pipeline/_web` and included in the Python wheel.
+
+## Recovery and evidence review
+
+The studio now saves browser-local recording recovery data, supports multiple meetings per day,
+and displays the draft alongside a searchable transcript and clickable audio citations. See
+[the reliability guide](studio-reliability.md) for recovery limits, structured corrections,
+legacy directory compatibility, and browser checks.

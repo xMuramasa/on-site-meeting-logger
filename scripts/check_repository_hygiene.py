@@ -35,7 +35,7 @@ GENERATED_ARTIFACT_FILENAMES = {
     "transcript.md",
     "validation-report.json",
 }
-MEETING_DIRECTORY = re.compile(r"\d{4}-\d{2}-\d{2}")
+MEETING_DIRECTORY = re.compile(r"\d{4}-\d{2}-\d{2}(?:--[0-9a-f-]{36})?")
 
 
 def _git(root: Path, *args: str) -> list[str]:

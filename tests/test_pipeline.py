@@ -178,7 +178,7 @@ def test_pipeline_runs_to_review_then_approved_render(tmp_path):
         audio_probe=fake_probe,
     )
     assert rendered.completed_stage == "render"
-    assert (meeting_dir / "Acta_Reunion_Semanal_2026-08-31.html").is_file()
+    assert (meeting_dir / f"Acta_Reunion_Semanal_2026-08-31_{meeting_dir.name.split('--')[1][:8]}.html").is_file()
     assert (meeting_dir / "build" / "acta-approved.json").is_file()
 
 
@@ -209,8 +209,8 @@ def test_pipeline_regenerates_derived_files_after_approved_review_edit(tmp_path)
 
     source_path = meeting_dir / "source" / "meeting.m4a"
     source_before = source_path.read_bytes()
-    markdown_path = meeting_dir / "Acta_Reunion_Semanal_2026-08-31.md"
-    html_path = meeting_dir / "Acta_Reunion_Semanal_2026-08-31.html"
+    markdown_path = meeting_dir / f"Acta_Reunion_Semanal_2026-08-31_{meeting_dir.name.split('--')[1][:8]}.md"
+    html_path = meeting_dir / f"Acta_Reunion_Semanal_2026-08-31_{meeting_dir.name.split('--')[1][:8]}.html"
     markdown_before = markdown_path.read_text(encoding="utf-8")
     html_before = html_path.read_text(encoding="utf-8")
     first_manifest = load_manifest(meeting_dir / "manifest.json")
@@ -261,9 +261,9 @@ def test_pipeline_rerenders_documents_when_branding_changes(tmp_path):
     )
     run_stages(meeting_dir, until="export_pdf", config_path=branding, **kwargs)
 
-    assert (meeting_dir / "Branded_Acta_2026-08-31.md").is_file()
-    assert (meeting_dir / "Branded_Acta_2026-08-31.html").is_file()
-    assert (meeting_dir / "Branded_Acta_2026-08-31.pdf").is_file()
+    assert (meeting_dir / f"Branded_Acta_2026-08-31_{meeting_dir.name.split('--')[1][:8]}.md").is_file()
+    assert (meeting_dir / f"Branded_Acta_2026-08-31_{meeting_dir.name.split('--')[1][:8]}.html").is_file()
+    assert (meeting_dir / f"Branded_Acta_2026-08-31_{meeting_dir.name.split('--')[1][:8]}.pdf").is_file()
     assert len(pdf_calls) == 2
 
 

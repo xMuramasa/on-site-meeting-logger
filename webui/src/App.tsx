@@ -12,10 +12,8 @@ import {
   LoaderCircle,
   Mic,
   Plus,
-  Radio,
   RefreshCw,
   RotateCcw,
-  Save,
   ShieldCheck,
   Sparkles,
   Upload,
@@ -25,6 +23,9 @@ import * as api from "./api";
 import { AudioPreview } from "./AudioPreview";
 import { audioWarning, formatDuration } from "./lib";
 import { useRecorder } from "./useRecorder";
+import { ReviewForm } from "./ReviewForm";
+import { EvidenceWorkspace } from "./EvidenceWorkspace";
+export { ReviewForm } from "./ReviewForm";
 
 const STAGE_LABELS: Record<string, string> = {
   inspect: "Audio inspeccionado",
@@ -110,6 +111,12 @@ function App() {
   const [items, setItems] = useState<api.MeetingSummary[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<api.MeetingDetail | null>(null);
+  const [previewRequest, setPreviewRequest] = useState<api.Review | null>(null);
+  const [actionLabels, setActionLabels] = useState<Record<string, string>>({});
+  const [title, setTitle] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const uploadId = useRef(crypto.randomUUID());
   const [meetingDate, setMeetingDate] = useState(today());
   const [selectedAudio, setSelectedAudio] = useState<File | null>(null);
   const [audioSource, setAudioSource] = useState<"recording" | "upload" | null>(null);
@@ -162,24 +169,28 @@ function App() {
   }, [reviewDirty, selected]);
 
   useEffect(() => {
-    if (!reviewDirty) return;
+    if (!reviewDirty && !capture.recording && !capture.stopping && !(selectedAudio && audioSource === "recording")) return;
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", warnBeforeUnload);
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
-  }, [reviewDirty]);
+  }, [reviewDirty, capture.recording, capture.stopping, selectedAudio, audioSource]);
 
   function selectMeeting(date: string | null) {
     if (date === selected) return;
+    if (capture.starting || capture.recording || capture.stopping) { setError("Detén la grabación antes de cambiar de reunión."); return; }
+    if (selectedAudio && audioSource === "recording" && !window.confirm("La grabación sigue guardada en este navegador. ¿Quieres cambiar de reunión antes de subirla?")) return;
     if (reviewDirty && !window.confirm("Tienes cambios sin guardar. ¿Quieres descartarlos y cambiar de reunión?")) return;
     setReviewDirty(false);
     setSelected(date);
-    if (date === null) setDetail(null);
+    setDetail(null);
+    setPreviewRequest(null);
+    setActionLabels({});
   }
 
-  const current = useMemo(() => items.find((item) => item.date === selected), [items, selected]);
+  const current = useMemo(() => items.find((item) => (item.id || item.date) === selected), [items, selected]);
   const audioInputs = capture.inputs || [];
   const selectedInputId = capture.selectedInputId || "default";
   const inputSupported = capture.inputSupported ?? true;
@@ -214,8 +225,11 @@ function App() {
     if (!selectedAudio) return setError("Selecciona un audio o graba la reunión primero.");
     setBusy(true); setError(""); setNotice("Subiendo audio de forma local…");
     try {
-      await api.uploadMeeting(meetingDate, selectedAudio, previous || undefined);
-      setSelected(meetingDate);
+      const accepted = await api.uploadMeeting(meetingDate, selectedAudio, previous || undefined, capture.sessionId || uploadId.current, title || undefined);
+      setSelected(accepted?.id || meetingDate);
+      await capture.uploaded?.();
+      setSelectedAudio(null); setAudioSource(null);
+      uploadId.current = crypto.randomUUID();
       setNotice("Procesamiento iniciado. Puedes dejar esta pestaña abierta.");
       await refresh();
     } catch (reason) {
@@ -223,11 +237,11 @@ function App() {
     } finally { setBusy(false); }
   }
 
-  async function persistReview(finalize = false) {
+  async function persistReview(finalize = false, prepared?: api.Review) {
     if (!selected || !detail?.review) return;
     setBusy(true); setError("");
     try {
-      await api.saveReview(selected, detail.review);
+      await api.saveReview(selected, prepared || detail.review);
       setReviewDirty(false);
       if (finalize) {
         try {
@@ -269,7 +283,7 @@ function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand"><strong>Meeting Studio</strong></div>
-        <div className="local-badge"><ShieldCheck size={15} /> Solo en este Mac</div>
+        <div className="local-badge"><ShieldCheck size={15} /> Estudio local</div>
       </header>
 
       <main className="workspace">
@@ -282,11 +296,13 @@ function App() {
             <span className="new-icon"><Plus size={18} /></span><span><strong>Nueva reunión</strong><small>Subir o grabar audio</small></span>
           </button>
           <div className="meeting-list">
-            {items.map((item) => {
+            <input aria-label="Buscar reuniones" placeholder="Buscar título o fecha" value={search} onChange={e => setSearch(e.target.value)} />
+            <select aria-label="Filtrar estado" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">Todos los estados</option><option value="validated">Validadas</option><option value="pending">Pendientes</option><option value="failed">Con errores</option></select>
+            {items.filter(item => `${item.title || ""} ${item.date}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()) && (!statusFilter || (statusFilter === "validated" ? item.stages.validate === "complete" : statusFilter === "failed" ? item.job?.status === "failed" : item.stages.validate !== "complete"))).map((item) => {
               const complete = item.stages.validate === "complete";
-              return <button key={item.date} className={`meeting-row ${selected === item.date ? "active" : ""}`} onClick={() => selectMeeting(item.date)}>
+              return <button key={item.id || item.date} className={`meeting-row ${selected === (item.id || item.date) ? "active" : ""}`} onClick={() => selectMeeting(item.id || item.date)}>
                 <StatusDot state={complete ? "complete" : item.job?.status} />
-                <span><strong>{new Date(`${item.date}T12:00:00`).toLocaleDateString("es-CL", { day: "numeric", month: "short", year: "numeric" })}</strong><small>{meetingStatus(item)}</small></span>
+                <span>{item.title && <strong>{item.title}</strong>}<strong>{new Date(`${item.date}T12:00:00`).toLocaleDateString("es-CL", { day: "numeric", month: "short", year: "numeric" })}</strong><small>{meetingStatus(item)}</small></span>
                 <ChevronRight size={15} />
               </button>;
             })}
@@ -303,20 +319,21 @@ function App() {
               </section>
 
               <form className="capture-card" onSubmit={submit}>
+                {!!capture.sessions?.length && <section className="recovery-list"><h3>Grabaciones guardadas en este navegador</h3>{capture.sessions.filter(item => item.id !== capture.sessionId).map(item => <div key={item.id}><span>{new Date(item.created).toLocaleString("es-CL")} · {formatDuration(item.samples / item.sampleRate)}</span><button type="button" disabled={capture.recording || capture.starting || capture.stopping || busy} onClick={() => { void capture.recover(item.id); }}>Recuperar</button><button type="button" disabled={capture.recording || capture.starting || capture.stopping || busy} onClick={() => { void capture.removeSession(item.id); }}>Descartar</button></div>)}</section>}
                 {boot && <ReadinessPanel readiness={boot.readiness} busy={busy} recheck={recheckReadiness} />}
                 <div className="card-title"><div><span className="step">01</span><h2>Fuente de audio</h2></div><span className="accepted-formats">M4A · WAV · MP3 · MP4 · WEBM · OGG</span></div>
                 <div className={`recorder ${capture.recording ? "is-recording" : ""}`}>
                   <div className="record-visual">
-                    <button type="button" className="record-button" onClick={capture.recording ? capture.stop : capture.start} aria-label={capture.recording ? "Detener grabación" : "Grabar reunión"}>
+                    <button type="button" className="record-button" disabled={capture.starting || capture.stopping || busy} onClick={capture.recording ? capture.stop : capture.start} aria-label={capture.recording ? "Detener grabación" : "Grabar reunión"}>
                       {capture.recording ? <CircleStop size={25} /> : <Mic size={25} />}
                     </button>
                     <div className="record-copy"><strong>{capture.recording ? "Grabando reunión" : audioSource === "recording" && selectedAudio ? "Grabación lista" : "Grabar con este Mac"}</strong><span>{capture.recording ? formatDuration(capture.elapsed) : audioSource === "recording" && selectedAudio ? selectedAudio.name : "Usa el micrófono seleccionado en el navegador"}</span></div>
                     {capture.recording && <div className="meter" aria-label="Nivel de audio">{[.55,.8,.42,.95,.64,.38,.78,.5].map((factor, i) => <i key={i} style={{ height: `${Math.max(12, capture.level * factor * 120)}%` }} />)}</div>}
                   </div>
-                  {audioSource === "recording" && selectedAudio && <button type="button" className="text-button" onClick={() => { capture.discard(); setSelectedAudio(null); setAudioSource(null); }}><RotateCcw size={14} /> Descartar</button>}
+                  {audioSource === "recording" && selectedAudio && <button type="button" className="text-button" disabled={busy || capture.stopping} onClick={() => { capture.discard(); setSelectedAudio(null); setAudioSource(null); }}><RotateCcw size={14} /> Descartar</button>}
                 </div>
-                <div className="input-selector">
-                  <label htmlFor="microphone-input"><span>Entrada de micrófono</span><select id="microphone-input" aria-label="Entrada de micrófono" value={selectedInputId} disabled={capture.recording || !inputSupported} onChange={(event) => capture.selectInput(event.target.value)}>
+                <p role="status">{capture.starting ? "Preparando micrófono y guardado local…" : capture.stopping ? "Guardando grabación…" : capture.recording ? `Guardado local: ${formatDuration(capture.savedSeconds || 0)}` : ""}</p><div className="input-selector">
+                  <label htmlFor="microphone-input"><span>Entrada de micrófono</span><select id="microphone-input" aria-label="Entrada de micrófono" value={selectedInputId} disabled={capture.recording || capture.starting || capture.stopping || busy || !inputSupported} onChange={(event) => capture.selectInput(event.target.value)}>
                     <option value="default">Entrada predeterminada del sistema</option>
                     {audioInputs.filter((device) => device.deviceId !== "default").map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Micrófono ${index + 1}`}</option>)}
                   </select></label>
@@ -328,35 +345,37 @@ function App() {
                 <p className="capture-help">Este selector solo selecciona una entrada de audio; no captura automáticamente el audio del sistema. Si instalaste un dispositivo loopback, podría aparecer aquí. Para una llamada, selecciona una entrada que incluya el audio del sistema o sube la grabación de la plataforma.</p>
                 <div className="or"><span>o selecciona archivos</span></div>
                 <label className="file-drop">
-                  <input type="file" accept="audio/*,.m4a,.mp3,.wav,.mp4,.webm,.ogg" onChange={(event) => { const file = event.target.files?.[0]; if (!file) return; capture.discard(); setSelectedAudio(file); setAudioSource("upload"); }} />
+                  <input disabled={capture.recording || capture.starting || capture.stopping || busy} type="file" accept="audio/*,.m4a,.mp3,.wav,.mp4,.webm,.ogg" onChange={(event) => { const file = event.target.files?.[0]; if (!file) return; capture.detach?.(); uploadId.current = crypto.randomUUID(); setSelectedAudio(file); setAudioSource("upload"); }} />
                   <span className="file-icon"><Upload size={20} /></span>
                   <span><strong>{audioSource === "upload" && selectedAudio ? `Archivo seleccionado: ${selectedAudio.name}` : "Elegir audio"}</strong><small>{audioSource === "upload" && selectedAudio ? `${(selectedAudio.size / 1048576).toFixed(1)} MB` : "M4A, WAV, MP3, MP4, WebM u OGG"}</small></span>
                 </label>
                 {selectedAudio && !capture.recording && <AudioPreview file={selectedAudio} />}
                 {capture.recording && <p className="capture-status" role="status">Detén la grabación antes de crear el borrador.</p>}
                 <div className="form-row">
-                  <label><span>Fecha</span><div className="input-wrap"><CalendarDays size={16} /><input type="date" value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} required /></div></label>
-                  <label><span>Acta anterior <em>opcional</em></span><div className="input-wrap file-compact"><FileText size={16} /><input type="file" accept=".pdf,.md,.markdown,.html,.htm,.json" onChange={(e) => setPrevious(e.target.files?.[0] || null)} /></div></label>
+                  <label><span>Título</span><input disabled={busy} aria-label="Título de la reunión" placeholder="Reunión semanal" maxLength={200} value={title} onChange={e => setTitle(e.target.value)} /></label><label><span>Fecha</span><div className="input-wrap"><CalendarDays size={16} /><input disabled={busy} type="date" value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} required /></div></label>
+                  <label><span>Acta anterior <em>opcional</em></span><div className="input-wrap file-compact"><FileText size={16} /><input disabled={busy} type="file" accept=".pdf,.md,.markdown,.html,.htm,.json" onChange={(e) => setPrevious(e.target.files?.[0] || null)} /></div></label>
                 </div>
-                <button className="primary-button" disabled={!selectedAudio || capture.recording || busy || !boot?.readiness.ok}>{busy ? <LoaderCircle className="spin" size={18} /> : <Sparkles size={18} />}{busy ? "Preparando…" : "Crear borrador de acta"}</button>
+                <button className="primary-button" disabled={!selectedAudio || capture.recording || capture.stopping || busy || !boot?.readiness.ok}>{busy ? <LoaderCircle className="spin" size={18} /> : <Sparkles size={18} />}{busy ? "Preparando…" : "Crear borrador de acta"}</button>
                 {capture.error && <p className="inline-error"><AlertCircle size={15} /> {capture.error}</p>}
                 {capture.warning && <p className="inline-error"><AlertCircle size={15} /> {capture.warning}</p>}
               </form>
             </div>
           ) : (
             <div className="meeting-detail">
-              <div className="detail-head"><div><span className="eyebrow accent">REUNIÓN · {selected}</span><h1>Revisión del acta</h1><p>Confirma solamente lo que una persona pueda respaldar.</p></div><div className={`job-badge ${detail?.job?.status || "idle"}`}>{detail?.job?.status === "running" && <LoaderCircle className="spin" size={15} />}{detail?.job?.status === "failed" ? "Error" : detail?.job?.status === "running" ? "Procesando" : detail?.job?.status === "blocked" ? "En espera" : current?.stages.validate === "complete" ? "Validada" : "Lista"}</div></div>
+              <div className="detail-head"><div><span className="eyebrow accent">REUNIÓN · {detail?.date || current?.date}</span><h1>Revisión del acta</h1><p>Confirma solamente lo que una persona pueda respaldar.</p></div><div className={`job-badge ${detail?.job?.status || "idle"}`}>{detail?.job?.status === "running" && <LoaderCircle className="spin" size={15} />}{detail?.job?.status === "failed" ? "Error" : detail?.job?.status === "running" ? "Procesando" : detail?.job?.status === "blocked" ? "En espera" : current?.stages.validate === "complete" ? "Validada" : "Lista"}</div></div>
 
               {detail?.job?.status === "blocked" && <DeploymentBlocked job={detail.job} busy={busy} restart={() => controlProcessing("restart")} />}
               {detail?.job?.status === "failed" && <ProcessingFailure job={detail.job} busy={busy} restart={() => controlProcessing("restart")} />}
               {detail?.audio_analysis && audioWarning(detail.audio_analysis.classification) && <div className="error-banner"><AlertCircle size={18} /><div><strong>Revisa la fuente de audio</strong><span>{audioWarning(detail.audio_analysis.classification)}</span></div></div>}
               {detail?.job?.status === "running" && <button className="secondary-button" disabled={busy} onClick={() => controlProcessing("cancel")}><CircleStop size={16} /> Cancelar</button>}
               {detail?.job?.status === "cancelled" && <div className="error-banner"><CircleStop size={18} /><div><strong>Procesamiento cancelado</strong><span>Puedes reanudar desde la última etapa completada.</span></div><button className="secondary-button" disabled={busy} onClick={() => controlProcessing("restart")}><RotateCcw size={16} /> Reanudar</button></div>}
+              {detail?.job?.total_chunks ? <p role="status">{detail.job.phase === "consolidate" ? "Consolidando borrador" : `Fragmentos: ${detail.job.completed_chunks || 0} de ${detail.job.total_chunks}`}</p> : null}
               <section className="progress-card">
                 {Object.entries(STAGE_LABELS).map(([key, label]) => <div className="stage" key={key}><StatusDot state={current?.stages[key]} /><span>{label}</span></div>)}
               </section>
 
-              {!detail?.review ? <section className="empty-review" aria-live="polite"><LoaderCircle className={detail?.job?.status === "running" ? "spin" : ""} size={28} /><h2>{detail?.job?.status === "running" ? "Construyendo borrador" : "La revisión aún no está disponible"}</h2><p>{detail?.job?.status === "cancelled" ? "Reanuda el procesamiento para volver a generar el borrador." : "Esta vista se actualizará automáticamente."}</p></section> : <ReviewForm review={detail.review} update={updateReview} busy={busy} dirty={reviewDirty} save={() => persistReview(false)} finalize={() => persistReview(true)} />}
+              {detail?.review_error && <p role="alert" className="error-banner">{detail.review_error}</p>}
+              {!detail?.review ? <section className="empty-review" aria-live="polite"><LoaderCircle className={detail?.job?.status === "running" ? "spin" : ""} size={28} /><h2>{detail?.job?.status === "running" ? "Construyendo borrador" : "La revisión aún no está disponible"}</h2><p>{detail?.job?.status === "cancelled" ? "Reanuda el procesamiento para volver a generar el borrador." : "Esta vista se actualizará automáticamente."}</p></section> : <div><EvidenceWorkspace busy={busy} previewRequest={previewRequest} onDraft={setActionLabels} key={`evidence:${selected}`} meetingId={selected} review={detail.review} update={updateReview} /><ReviewForm preview={setPreviewRequest} actionLabels={actionLabels} key={`review:${selected}`} review={detail.review} update={updateReview} busy={busy} dirty={reviewDirty} save={review => persistReview(false, review)} finalize={review => persistReview(true, review)} /></div>}
 
               {!!detail?.artifacts.length && <Deliverables meetingDate={selected} artifacts={detail.artifacts} />}
             </div>
@@ -379,17 +398,5 @@ export function Deliverables({ meetingDate, artifacts }: { meetingDate: string; 
   return <section className="outputs"><div className="section-title"><div><span className="step">03</span><h2>Entregables</h2></div><FileCheck2 size={21} /></div><div className="output-grid">{artifacts.map((artifact) => <a key={artifact.name} href={`/api/meetings/${meetingDate}/files/${encodeURIComponent(artifact.name)}`}><span><FileAudio size={18} /><span><strong>{artifact.final ? "Acta final" : ROLE_LABELS[artifact.role]} · {artifact.format}</strong><small>{artifact.name}</small></span></span><Download size={16} /></a>)}</div></section>;
 }
 
-export function ReviewForm({ review, update, busy, dirty, save, finalize }: { review: api.Review; update: (fn: (value: api.Review) => api.Review) => void; busy: boolean; dirty: boolean; save: () => void; finalize: () => void }) {
-  return <div className="review-stack">
-    <section className="review-card"><div className="section-title"><div><span className="step">02</span><h2>Confirmaciones humanas</h2></div><Radio size={21} /></div>
-      <h3>Asistencia</h3><div className="participant-grid">{review.participants.map((person, index) => <div className="participant" key={`${person.name}-${index}`}><span className="avatar">{person.name.slice(0, 1)}</span><span className="person-copy"><strong>{person.name}</strong><small>{person.email || "Sin correo"}</small></span><select aria-label={`Asistencia de ${person.name}`} value={person.attended === true ? "yes" : person.attended === false ? "no" : ""} onChange={(e) => update((value) => ({ ...value, participants: value.participants.map((item, i) => i === index ? { ...item, attended: e.target.value === "yes" ? true : e.target.value === "no" ? false : null } : item) }))}><option value="">Por confirmar</option><option value="yes">Asistió</option><option value="no">No asistió</option></select></div>)}</div>
-      {!!Object.keys(review.owners).length && <><h3>Responsables por confirmar</h3><div className="field-grid">{Object.entries(review.owners).map(([id, owner]) => <label key={id}><span>{id}</span><input value={owner === "unresolved" ? "" : owner} placeholder="Nombre o dejar sin resolver" onChange={(e) => update((value) => ({ ...value, owners: { ...value.owners, [id]: e.target.value || "unresolved" } }))} /></label>)}</div></>}
-      {!!review.relative_date_actions.length && <><h3>Fechas relativas</h3><div className="field-grid">{review.relative_date_actions.map((action, index) => <label className="relative-date-field" key={action.action_id}><span>{action.action_id} · {action.action_text}</span><small>Expresión original: {action.due_expression}</small><input aria-label={`Fecha resuelta para ${action.action_id}`} type="date" value={action.resolved_date || ""} onChange={(e) => update((value) => ({ ...value, relative_date_actions: value.relative_date_actions.map((item, itemIndex) => itemIndex === index ? { ...item, resolved_date: e.target.value || null } : item) }))} /></label>)}</div></>}
-      <h3>Nombres propios</h3><div className="proper-nouns"><textarea aria-label="Correcciones de nombres propios" value={Object.entries(review.proper_nouns).map(([from, to]) => `${from} → ${to}`).join("\n")} placeholder={'Una corrección por línea: “nombre incorrecto → Nombre Correcto”'} onChange={(e) => update((value) => ({ ...value, proper_nouns: Object.fromEntries(e.target.value.split("\n").map((line) => line.split(/\s*(?:→|=>)\s*/, 2)).filter((pair) => pair.length === 2 && pair[0] && pair[1])) }))} /><small>Usa una flecha por línea. Se aplicará al documento aprobado.</small></div>
-      {!!review.quality_warnings.length && <div className="warning-list"><strong>Avisos de calidad</strong>{review.quality_warnings.map((warning) => <p key={warning}><AlertCircle size={14} />{warning}</p>)}</div>}
-    </section>
-    <section className="approval-card"><div><label className="approval-check"><input type="checkbox" checked={review.approve_for_final_render} onChange={(e) => update((value) => ({ ...value, approve_for_final_render: e.target.checked }))} /><span><ShieldCheck size={22} /><span><strong>Aprobar para render final</strong><small>Confirmo que revisé asistencia, responsables y fechas.</small></span></span></label>{dirty && <p className="stale-output" role="status">Cambios sin guardar: los entregables finales actuales quedarán desactualizados al guardar.</p>}</div><div className="approval-actions"><button className="secondary-button" disabled={busy} onClick={save}><Save size={17} /> Guardar cambios</button><button className="primary-button compact" disabled={busy || !review.approve_for_final_render} onClick={finalize}>{busy ? <LoaderCircle className="spin" size={17} /> : <FileCheck2 size={17} />} Guardar y finalizar</button></div></section>
-  </div>;
-}
 
 export default App;

@@ -66,9 +66,10 @@ def test_ingest_refuses_to_replace_different_source_even_with_force(tmp_path):
     first.write_bytes(b"first")
     second.write_bytes(b"second")
     root = tmp_path / "out"
-    ingest_meeting(first, None, date(2026, 9, 7), root)
+    original = ingest_meeting(first, None, date(2026, 9, 7), root)
+    identity = load_manifest(original / "manifest.json").meeting_id
     with pytest.raises(IngestError, match="different source"):
-        ingest_meeting(second, None, date(2026, 9, 7), root, force=True)
+        ingest_meeting(second, None, date(2026, 9, 7), root, force=True, meeting_id=identity)
 
 
 def test_ingest_rejects_unsupported_audio(tmp_path):

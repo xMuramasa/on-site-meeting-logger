@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bootstrap, MeetingDetail, MeetingSummary, Review } from "./api";
 
 const mocks = vi.hoisted(() => ({
+  getDraft: vi.fn().mockRejectedValue(new Error("No draft in component fixture")),
+  getTranscript: vi.fn().mockRejectedValue(new Error("No transcript in component fixture")),
   bootstrap: vi.fn(),
   meetings: vi.fn(),
   meeting: vi.fn(),
@@ -159,7 +161,7 @@ describe("Meeting Studio browser workflows", () => {
 
     await click(button("Crear borrador de acta"));
 
-    expect(mocks.uploadMeeting).toHaveBeenCalledWith(expect.any(String), audio, undefined);
+    expect(mocks.uploadMeeting).toHaveBeenCalledWith(expect.any(String), audio, undefined, expect.any(String), undefined);
     expect(container.textContent).toContain("Procesamiento iniciado");
   });
 
@@ -179,7 +181,7 @@ describe("Meeting Studio browser workflows", () => {
 
     expect(container.textContent).toContain("Archivo seleccionado: reunion-final.m4a");
     await click(button("Crear borrador de acta"));
-    expect(mocks.uploadMeeting).toHaveBeenCalledWith(expect.any(String), upload, undefined);
+    expect(mocks.uploadMeeting).toHaveBeenCalledWith(expect.any(String), upload, undefined, expect.any(String), undefined);
     expect(mocks.uploadMeeting.mock.calls[0]?.[1]).toBe(upload);
     expect(mocks.uploadMeeting.mock.calls[0]?.[1]).not.toBe(recording);
   });
@@ -195,7 +197,7 @@ describe("Meeting Studio browser workflows", () => {
 
     expect(container.textContent).toContain("Archivo seleccionado: reunion.m4a");
     await click(button("Crear borrador de acta"));
-    expect(mocks.uploadMeeting).toHaveBeenCalledWith(expect.any(String), upload, undefined);
+    expect(mocks.uploadMeeting).toHaveBeenCalledWith(expect.any(String), upload, undefined, expect.any(String), undefined);
   });
 
   it("makes recording state explicit and prevents submission until it stops", async () => {
@@ -375,6 +377,8 @@ describe("Meeting Studio browser workflows", () => {
     await waitFor(() => !button("Guardar y finalizar").hasAttribute("disabled"));
     const corrections = container.querySelector('textarea[aria-label="Correcciones de nombres propios"]') as HTMLTextAreaElement;
     await setInput(corrections, "Obvio → Obvio Health");
+    expect(button("Guardar y finalizar").disabled).toBe(true);
+    await click(container.querySelector('input[type="checkbox"]')!);
     await click(button("Guardar y finalizar"));
 
     expect(mocks.saveReview).toHaveBeenCalledTimes(2);
@@ -391,6 +395,8 @@ describe("Meeting Studio browser workflows", () => {
 
     const corrections = container.querySelector('textarea[aria-label="Correcciones de nombres propios"]') as HTMLTextAreaElement;
     await setInput(corrections, "Obvio → Obvio Health");
+    expect(button("Guardar y finalizar").disabled).toBe(true);
+    await click(container.querySelector('input[type="checkbox"]')!);
     await click(button("Guardar y finalizar"));
 
     expect(mocks.saveReview).toHaveBeenCalledOnce();

@@ -1,6 +1,8 @@
 """Loopback-only web API for upload, recording, review, and finalization."""
+
 from __future__ import annotations
 
+import json
 import secrets
 import shutil
 from collections.abc import Callable
@@ -8,6 +10,7 @@ from contextlib import suppress
 from datetime import date
 from pathlib import Path
 from typing import Any
+from uuid import UUID, uuid4
 
 import yaml
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -26,7 +29,8 @@ from .manifest import (
     write_manifest,
     write_text_atomic,
 )
-from .models import AudioLevelAnalysis, ReviewState
+from .meetings import find_meeting, meeting_artifact, meeting_key, meeting_records, meeting_source
+from .models import AudioLevelAnalysis, CanonicalActa, ReviewState, Transcript
 from .pipeline import (
     STAGES,
     clear_cancellation,
@@ -36,7 +40,7 @@ from .pipeline import (
 )
 from .previous_context import SUPPORTED_PREVIOUS_ACTA
 from .readiness import ReadinessCheck, ReadinessReport, check_readiness
-from .review import load_review
+from .review import apply_review, draft_hash, load_review
 
 TRUSTED_ORIGINS = {
     "http://127.0.0.1",
@@ -72,7 +76,13 @@ def _durable_job(manifest: Any) -> dict[str, Any] | None:
     states = list(manifest.stages.items())
     for name, state in reversed(states):
         if state.status == "running":
-            return {"status": "running", "stage": name}
+            return {
+                "status": "running",
+                "stage": name,
+                "phase": state.phase,
+                "completed_chunks": state.completed_chunks,
+                "total_chunks": state.total_chunks,
+            }
     for name, state in reversed(states):
         if state.status == "blocked":
             return {"status": "blocked", "stage": name, "retryable": True}
@@ -91,7 +101,8 @@ def _durable_job(manifest: Any) -> dict[str, Any] | None:
 
 def _mark_interrupted_jobs(root: Path) -> None:
     """Recover abandoned stages without modifying another process's live job."""
-    for manifest_path in root.glob("????-??-??/manifest.json"):
+    for meeting_dir, _ in meeting_records(root):
+        manifest_path = meeting_dir / "manifest.json"
         try:
             with meeting_lock(manifest_path.parent):
                 manifest = load_manifest(manifest_path)
@@ -261,7 +272,6 @@ def create_app(
     token = csrf_token or secrets.token_urlsafe(32)
     origins = allowed_origins or TRUSTED_ORIGINS
 
-
     app = FastAPI(title="Meeting Studio", docs_url=None, redoc_url=None)
     app.state.output_root = root
     app.state.csrf_token = token
@@ -332,11 +342,15 @@ def create_app(
                     write_manifest(manifest_path, manifest)
 
     def meeting_path(value: str) -> Path:
-        parsed = _safe_date(value)
-        path = root / parsed.isoformat()
-        if not path.is_dir():
-            raise HTTPException(status_code=404, detail="meeting not found")
-        return path
+        try:
+            return find_meeting(root, value)
+        except PipelineError as exc:
+            # Legacy review-only directories remain usable without being listed as jobs.
+            if len(value) == 10 and _safe_date(value):
+                legacy = root / value
+                if legacy.is_dir() and not legacy.is_symlink():
+                    return legacy
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     def reject_active_job(path: Path, manifest: Any | None = None) -> None:
         job = _durable_job(manifest) if manifest is not None else _job_for_meeting(path)
@@ -345,7 +359,7 @@ def create_app(
                 status_code=409, detail="a pipeline job is already active for this meeting"
             )
         # One deployment root, one expensive job: the local models cannot serve two meetings.
-        for other in sorted(root.glob("????-??-??")):
+        for other, _ in meeting_records(root):
             if other.resolve() == path.resolve():
                 continue
             running = _job_for_meeting(other)
@@ -372,19 +386,17 @@ def create_app(
     @app.get("/api/meetings")
     def list_meetings() -> dict[str, Any]:
         items = []
-        for manifest_path in sorted(root.glob("????-??-??/manifest.json"), reverse=True):
-            try:
-                manifest = load_manifest(manifest_path)
-            except PipelineError:
-                continue
+        for _, manifest in sorted(
+            meeting_records(root), key=lambda record: record[1].created_at, reverse=True
+        ):
             key = manifest.meeting_date.isoformat()
             items.append(
                 {
+                    "id": meeting_key(manifest),
+                    "title": manifest.title or "Reunión semanal",
                     "date": key,
                     "source": manifest.source_filename,
-                    "stages": {
-                        name: state.status for name, state in manifest.stages.items()
-                    },
+                    "stages": {name: state.status for name, state in manifest.stages.items()},
                     "job": _durable_job(manifest),
                 }
             )
@@ -396,15 +408,29 @@ def create_app(
         meeting_date: str = Form(...),
         audio: UploadFile = File(...),
         previous_acta: UploadFile | None = File(None),
+        meeting_id: UUID | None = Form(None),
+        title: str | None = Form(None, min_length=1, max_length=200),
     ) -> dict[str, Any]:
-        report = readiness()
+        parsed = _safe_date(meeting_date)
+        identity = meeting_id or uuid4()
+        existing = next((m for _, m in meeting_records(root) if m.meeting_id == identity), None)
+        existing_id = existing is not None
+        report = readiness() if not existing_id else ReadinessReport(checks=[])
         if not report.ok:
             failures = "; ".join(
                 f"{check.name}: {check.detail}" for check in report.checks if not check.ok
             )
             raise HTTPException(status_code=503, detail=f"pipeline is not ready: {failures}")
-        parsed = _safe_date(meeting_date)
-        reject_active_job(root / parsed.isoformat())
+        # Retries acknowledge durable ingestion even when models are now unavailable.
+        if not existing_id:
+            reject_active_job(root / f"{parsed.isoformat()}--{identity}")
+        if title is None:
+            if existing is not None:
+                title = existing.title
+            else:
+                from .config import load_config
+
+                title = load_config(config_path).meeting.title
         request_dir = incoming / secrets.token_urlsafe(16)
         request_dir.mkdir(mode=0o700)
         try:
@@ -414,13 +440,21 @@ def create_app(
                 previous_path = await _save_upload(
                     previous_acta, request_dir / "previous-acta", set(SUPPORTED_PREVIOUS_ACTA)
                 )
-            meeting_dir = ingest_meeting(audio_path, previous_path, parsed, output_root=root)
+            meeting_dir = ingest_meeting(
+                audio_path,
+                previous_path,
+                parsed,
+                output_root=root,
+                meeting_id=identity,
+                title=title,
+            )
         except PipelineError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         finally:
             shutil.rmtree(request_dir, ignore_errors=True)
-        background.add_task(start_job, meeting_dir, "generate_review")
-        return {"date": parsed.isoformat(), "status": "accepted"}
+        if not existing_id:
+            background.add_task(start_job, meeting_dir, "generate_review")
+        return {"id": str(identity), "date": parsed.isoformat(), "status": "accepted"}
 
     @app.get("/api/meetings/{meeting_date}")
     def get_meeting(meeting_date: str) -> dict[str, Any]:
@@ -434,18 +468,80 @@ def create_app(
                 ).model_dump(mode="json")
         review_path = path / "review.yaml"
         review = None
+        review_error = None
         if review_path.is_file():
             try:
                 review = load_review(review_path).model_dump(mode="json")
             except PipelineError as exc:
-                review = {"error": str(exc)}
+                review_error = str(exc)
+        manifest = (
+            load_manifest(path / "manifest.json") if (path / "manifest.json").exists() else None
+        )
         return {
-            "date": meeting_date,
+            "id": meeting_key(manifest) if manifest else meeting_date,
+            "date": manifest.meeting_date.isoformat() if manifest else meeting_date,
+            "title": manifest.title if manifest else None,
+            "review_error": review_error,
             "job": _job_for_meeting(path),
             "audio_analysis": audio_analysis,
             "review": review,
             "artifacts": _artifact_records(path),
         }
+
+    def read_draft(path: Path) -> CanonicalActa:
+        try:
+            return CanonicalActa.model_validate_json(
+                meeting_artifact(path, "build", "acta-draft.json").read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError, PipelineError) as exc:
+            raise HTTPException(status_code=409, detail="draft is not available") from exc
+
+    def validate_review(path: Path, review: ReviewState) -> CanonicalActa:
+        draft = read_draft(path)
+        if review.draft_hash is not None and review.draft_hash != draft_hash(draft):
+            raise HTTPException(status_code=409, detail="draft changed; reload before saving")
+        try:
+            approved = apply_review(draft, review, require_approval=False)
+            transcript_path = path / "build" / "transcript.json"
+            if transcript_path.is_file():
+                transcript = Transcript.model_validate_json(transcript_path.read_text())
+                known = {segment.id for segment in transcript.segments}
+                for edit in review.content_edits:
+                    for evidence in edit.evidence or []:
+                        if not set(evidence.segment_ids) <= known:
+                            raise ValueError("citation references unknown transcript segments")
+            return approved
+        except (PipelineError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/api/meetings/{meeting_date}/draft")
+    def get_draft(meeting_date: str) -> dict:
+        draft = read_draft(meeting_path(meeting_date))
+        return {"draft": draft.model_dump(mode="json"), "draft_hash": draft_hash(draft)}
+
+    @app.get("/api/meetings/{meeting_date}/transcript")
+    def get_transcript(meeting_date: str) -> dict:
+        try:
+            path = meeting_artifact(meeting_path(meeting_date), "build", "transcript.json")
+        except PipelineError as exc:
+            raise HTTPException(status_code=404, detail="transcript is not available") from exc
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="transcript is not available")
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    @app.get("/api/meetings/{meeting_date}/audio")
+    def get_audio(meeting_date: str) -> FileResponse:
+        path = meeting_path(meeting_date)
+        manifest = load_manifest(path / "manifest.json")
+        try:
+            source = meeting_source(path, manifest.source_filename)
+        except PipelineError as exc:
+            raise HTTPException(status_code=404, detail="audio is not available") from exc
+        return FileResponse(source)
+
+    @app.post("/api/meetings/{meeting_date}/review-preview")
+    def preview_review(meeting_date: str, review: ReviewState) -> dict:
+        return validate_review(meeting_path(meeting_date), review).model_dump(mode="json")
 
     @app.put("/api/meetings/{meeting_date}/review")
     def save_review(meeting_date: str, review: ReviewState) -> dict[str, bool]:
@@ -455,6 +551,10 @@ def create_app(
         )
         try:
             with meeting_lock(path):
+                if (path / "build" / "acta-draft.json").is_file():
+                    validate_review(path, review)
+                elif review.content_edits:
+                    raise HTTPException(status_code=409, detail="draft is not available")
                 write_text_atomic(path / "review.yaml", serialized)
                 manifest_path = path / "manifest.json"
                 if manifest_path.is_file():

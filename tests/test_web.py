@@ -100,7 +100,7 @@ def test_upload_accepts_browser_recording_and_starts_draft(tmp_path):
     )
 
     assert response.status_code == 202
-    meeting_dir = tmp_path / "meetings" / "2026-09-03"
+    meeting_dir = tmp_path / "meetings" / f"2026-09-03--{response.json()['id']}"
     manifest = PipelineManifest.model_validate_json((meeting_dir / "manifest.json").read_text())
     assert manifest.meeting_date == date(2026, 9, 3)
     assert (meeting_dir / "source" / "meeting.webm").read_bytes() == b"browser-audio"
@@ -213,7 +213,7 @@ def test_review_round_trip_and_finalize(tmp_path):
 
     saved = api.put("/api/meetings/2026-09-03/review", headers=headers, json=review)
     assert saved.status_code == 200
-    assert api.get("/api/meetings/2026-09-03").json()["review"] == review
+    assert api.get("/api/meetings/2026-09-03").json()["review"] == {**review, "draft_hash": None, "content_edits": []}
 
     blocked = api.post("/api/meetings/2026-09-03/finalize", headers=headers)
     assert blocked.status_code == 409

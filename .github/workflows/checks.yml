@@ -1,0 +1,26 @@
+name: Checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.11.28'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+      - run: uv sync --locked --python 3.12
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: bun install --frozen-lockfile
+        working-directory: webui
+      - run: bunx playwright install --with-deps chromium webkit
+        working-directory: webui
+      - run: make check
+      - run: bun run test:browser
+        working-directory: webui
+      - run: uv build
+      - run: uv run pytest -q tests/test_installed_wheel.py

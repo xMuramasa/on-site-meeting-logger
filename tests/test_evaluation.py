@@ -96,7 +96,7 @@ def test_evaluate_reviewed_meeting_replays_model_and_writes_aggregate_only_repor
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report_path == meeting_dir / "build" / "evaluation-report.json"
     assert report["citation_precision"] == pytest.approx(1.0)
-    assert report["unsupported_claims"] == 0
+    assert report["unmatched_generated_claims"] == 0
     assert report["decision_as_proposal_errors"] == 0
     assert report["proposal_as_decision_errors"] == 0
     assert report["schema_repairs"] == 0
@@ -118,8 +118,8 @@ def test_evaluate_reviewed_meeting_counts_unsupported_and_type_errors(tmp_path):
         evaluate_reviewed_meeting(meeting_dir, provider=FakeProvider(generated)).read_text(encoding="utf-8")
     )
 
-    assert report["unsupported_claims"] == 0
-    assert report["decision_as_proposal_errors"] == 1
+    assert report["unmatched_generated_claims"] == 0
+    assert report["proposal_as_decision_errors"] == 1
 
 
 def test_evaluate_reviewed_meeting_counts_schema_repairs_per_model_call(tmp_path):

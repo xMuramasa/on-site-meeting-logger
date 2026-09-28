@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import date as Date
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -308,6 +309,7 @@ class Section(Strict):
 
 
 class MeetingMetadata(Strict):
+    meeting_id: UUID | None = None
     title: str = Field(min_length=1)
     date: Date
     location: str = Field(min_length=1)
@@ -327,7 +329,8 @@ class MeetingMetadata(Strict):
         return spanish_long_date(self.previous_acta_date) if self.previous_acta_date else None
 
     def slug(self) -> str:
-        return f"Acta_Reunion_Semanal_{self.date.isoformat()}"
+        suffix = f"_{str(self.meeting_id)[:8]}" if self.meeting_id else ""
+        return f"Acta_Reunion_Semanal_{self.date.isoformat()}{suffix}"
 
 
 class CanonicalActa(Strict):
@@ -434,7 +437,23 @@ class RelativeDateReview(Strict):
     resolved_date: Date | None = None
 
 
+class ContentEdit(Strict):
+    kind: Literal["paragraph", "action", "decision", "proposal", "risk", "question"]
+    target: str
+    remove: bool = False
+    text: str | None = Field(default=None, min_length=1)
+    evidence: list[EvidenceRange] | None = None
+    acceptance: str | None = Field(default=None, min_length=1)
+    dependencies: list[str] | None = None
+    owner: str | None = None
+    due_date: Date | None = None
+    clear_owner: bool = False
+    clear_due_date: bool = False
+
+
 class ReviewState(Strict):
+    draft_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    content_edits: list[ContentEdit] = Field(default_factory=list)
     participants: list[ReviewParticipant] = Field(default_factory=list)
     proper_nouns: dict[str, str] = Field(default_factory=dict)
     owners: dict[str, str] = Field(default_factory=dict)
@@ -447,6 +466,9 @@ StageStatus = Literal["pending", "running", "complete", "failed", "cancelled", "
 
 
 class StageState(Strict):
+    phase: str | None = None
+    completed_chunks: int = Field(default=0, ge=0)
+    total_chunks: int = Field(default=0, ge=0)
     status: StageStatus = "pending"
     fingerprint: str | None = None
     started_at: datetime | None = None
@@ -459,6 +481,8 @@ class StageState(Strict):
 
 
 class PipelineManifest(Strict):
+    meeting_id: UUID | None = None
+    title: str | None = Field(default=None, min_length=1)
     pipeline_version: str
     meeting_dir: str
     meeting_date: Date
