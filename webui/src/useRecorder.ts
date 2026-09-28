@@ -6,6 +6,15 @@ import { discardRecording, listRecordings, recoverRecording, type RecordingSessi
 
 export type AudioInput = Pick<MediaDeviceInfo, "deviceId" | "label">;
 
+type WakeLockSentinel = {
+  addEventListener: (type: "release", listener: () => void) => void;
+  release: () => Promise<void>;
+};
+
+type WakeLockNavigator = Navigator & {
+  wakeLock?: { request: (type: "screen") => Promise<WakeLockSentinel> };
+};
+
 export function recorderErrorMessage(reason: unknown) {
   if (reason instanceof DOMException) {
     if (reason.name === "NotAllowedError" || reason.name === "SecurityError") {
@@ -34,6 +43,7 @@ export function useRecorder() {
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
+  const [wakeLockWarning, setWakeLockWarning] = useState("");
   const [inputs, setInputs] = useState<AudioInput[]>([]);
   const [selectedInputId, setSelectedInputId] = useState("default");
   const [inputError, setInputError] = useState("");
@@ -46,6 +56,7 @@ export function useRecorder() {
   const diagnostics = useRef(new LiveAudioDiagnostics());
   const peak = useRef(0);
   const session = useRef(0);
+  const wakeLock = useRef<WakeLockSentinel | null>(null);
 
   const refreshInputs = useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) {
@@ -67,7 +78,36 @@ export function useRecorder() {
     }
   }, []);
 
+  const releaseWakeLock = useCallback(() => {
+    const sentinel = wakeLock.current;
+    wakeLock.current = null;
+    if (sentinel) void Promise.resolve(sentinel.release()).catch(() => undefined);
+  }, []);
+
+  const requestWakeLock = useCallback(async (currentSession: number) => {
+    const api = (navigator as WakeLockNavigator).wakeLock;
+    if (!api?.request) {
+      setWakeLockWarning("La grabación continúa, pero este navegador no puede mantener la pantalla activa. No se garantiza la captura si el equipo se suspende.");
+      return;
+    }
+    try {
+      const sentinel = await api.request("screen");
+      if (session.current !== currentSession || recorder.current?.state !== "recording") {
+        void Promise.resolve(sentinel.release()).catch(() => undefined);
+        return;
+      }
+      wakeLock.current = sentinel;
+      sentinel.addEventListener("release", () => {
+        if (wakeLock.current === sentinel) wakeLock.current = null;
+      });
+      setWakeLockWarning("");
+    } catch {
+      setWakeLockWarning("La grabación continúa, pero no se pudo mantener la pantalla activa. Mantén esta pestaña visible y evita que el equipo se suspenda.");
+    }
+  }, []);
+
   const cleanup = useCallback(() => {
+    releaseWakeLock();
     if (timer.current) window.clearInterval(timer.current);
     if (frame.current) cancelAnimationFrame(frame.current);
     stream.current?.getTracks().forEach((track) => track.stop());
@@ -77,7 +117,7 @@ export function useRecorder() {
     stream.current = null;
     audioContext.current = null;
     setLevel(0);
-  }, []);
+  }, [releaseWakeLock]);
 
   useEffect(() => () => {
     session.current += 1;
@@ -92,6 +132,16 @@ export function useRecorder() {
     return () => navigator.mediaDevices.removeEventListener("devicechange", refreshInputs);
   }, [refreshInputs]);
 
+  useEffect(() => {
+    const reacquireWakeLock = () => {
+      if (document.visibilityState === "visible" && recorder.current?.state === "recording" && !wakeLock.current) {
+        void requestWakeLock(session.current);
+      }
+    };
+    document.addEventListener("visibilitychange", reacquireWakeLock);
+    return () => document.removeEventListener("visibilitychange", reacquireWakeLock);
+  }, [requestWakeLock]);
+
   const start = async () => {
     if (startingRef.current || recording || stopping) return;
     startingRef.current = true;
@@ -103,6 +153,7 @@ export function useRecorder() {
     setError("");
     setWarning("");
     setSavedSeconds(0);
+    setWakeLockWarning("");
     setFile(null);
     setSessionId(null);
     diagnostics.current = new LiveAudioDiagnostics();
@@ -181,6 +232,7 @@ export function useRecorder() {
       timer.current = window.setInterval(() => setElapsed((value) => value + 1), 1000);
       instance.start(1000);
       setRecording(true);
+      void requestWakeLock(currentSession);
     } catch (reason) {
       cleanup();
       if (session.current === currentSession) {
@@ -195,6 +247,7 @@ export function useRecorder() {
 
   const stop = () => {
     if (recorder.current?.state === "recording") { setStopping(true); recorder.current.stop(); }
+    releaseWakeLock();
   };
   const discard = () => {
     if (recording || stopping) return;
@@ -209,6 +262,7 @@ export function useRecorder() {
     setElapsed(0);
     setError("");
     setWarning("");
+    setWakeLockWarning("");
   };
   const selectInput = (deviceId: string) => {
     if (recording) return;
@@ -216,7 +270,7 @@ export function useRecorder() {
     setInputError("");
   };
   return {
-    recording, elapsed, level, file, error, warning, start, stop, discard,
+    recording, elapsed, level, file, error, warning, wakeLockWarning, start, stop, discard,
     savedSeconds, sessions, sessionId, stopping, starting,
     async recover(id: string) {
       try { setFile(await recoverRecording(id)); setSessionId(id); }

@@ -351,6 +351,7 @@ function App() {
                 </label>
                 {selectedAudio && !capture.recording && <AudioPreview file={selectedAudio} />}
                 {capture.recording && <p className="capture-status" role="status">Detén la grabación antes de crear el borrador.</p>}
+                {capture.wakeLockWarning && <p className="capture-help" role="status">{capture.wakeLockWarning}</p>}
                 <div className="form-row">
                   <label><span>Título</span><input disabled={busy} aria-label="Título de la reunión" placeholder="Reunión semanal" maxLength={200} value={title} onChange={e => setTitle(e.target.value)} /></label><label><span>Fecha</span><div className="input-wrap"><CalendarDays size={16} /><input disabled={busy} type="date" value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} required /></div></label>
                   <label><span>Acta anterior <em>opcional</em></span><div className="input-wrap file-compact"><FileText size={16} /><input disabled={busy} type="file" accept=".pdf,.md,.markdown,.html,.htm,.json" onChange={(e) => setPrevious(e.target.files?.[0] || null)} /></div></label>
