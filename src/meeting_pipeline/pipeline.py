@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -434,17 +435,23 @@ def run_stages(
     audio_level_inspector: Callable[[Path], AudioLevelAnalysis] | None = None,
     pdf_exporter: Callable[..., Path] = export_pdf,
     busy_wait_seconds: float = DEPLOYMENT_LOCK_WAIT_SECONDS,
+    acquire_deployment_lock: bool = True,
 ) -> PipelineResult:
     """Run one meeting exclusively and leave every attempted stage durable and resumable.
 
     The deployment lock is taken first and covers *every* meeting under the same output
     root, so a second meeting waits (briefly) and is then refused rather than fighting the
-    first one for memory. It is released before any stage state is touched, so contention
-    never lands in the manifest as a failure.
+    first one for memory. Queue workers already hold that same lock across claim and work,
+    and pass ``acquire_deployment_lock=False`` to avoid a nested lock operation.
     """
     meeting_dir = Path(meeting_dir).expanduser().resolve()
     manifest_path = meeting_dir / "manifest.json"
-    with deployment_lock(meeting_dir.parent, busy_wait_seconds), meeting_lock(meeting_dir):
+    lock = (
+        deployment_lock(meeting_dir.parent, busy_wait_seconds)
+        if acquire_deployment_lock
+        else contextlib.nullcontext()
+    )
+    with lock, meeting_lock(meeting_dir):
         try:
             return _run_stages(
                 meeting_dir,
