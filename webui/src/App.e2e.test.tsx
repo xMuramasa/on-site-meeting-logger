@@ -212,6 +212,29 @@ describe("Meeting Studio browser workflows", () => {
     expect(button("Crear borrador de acta")).toHaveProperty("disabled", true);
   });
 
+  it("offers an optional microphone test that never blocks starting a recording", async () => {
+    await renderApp();
+
+    expect(container.querySelector('[aria-label="Prueba de micrófono"]')).not.toBeNull();
+    await click(button("Omitir prueba"));
+    expect(container.textContent).toContain("Prueba de micrófono omitida");
+
+    const record = container.querySelector('button[aria-label="Grabar reunión"]') as HTMLButtonElement;
+    expect(record.disabled).toBe(false);
+    await click(record);
+    expect(mocks.useRecorder.mock.results[0]?.value.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the microphone test while a meeting is recording", async () => {
+    mocks.useRecorder.mockReturnValue({
+      recording: true, elapsed: 3, level: .2, file: null, error: "", warning: "",
+      start: vi.fn(), stop: vi.fn(), discard: vi.fn(),
+    });
+    await renderApp();
+
+    expect(container.querySelector('[aria-label="Prueba de micrófono"]')).toBeNull();
+  });
+
   it("lets the user choose a named microphone before recording without starting capture", async () => {
     const selectInput = vi.fn();
     mocks.useRecorder.mockReturnValue({

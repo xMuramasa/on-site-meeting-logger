@@ -193,3 +193,19 @@ fieldset.evidence-workspace { min-width: 0; }
 .claim-editor textarea { font-size: 14px; line-height: 1.55; }
 .action-fields label, .evidence-range label, .claim-editor details { font-size: 13px; }
 .storage-capacity { margin: 10px 0 0; padding: 8px 10px; color: var(--muted-foreground); background: color-mix(in srgb, var(--accent) 42%, transparent); border-radius: 7px; font-size: 11px; line-height: 1.45; }
+.mic-preflight { margin-top: 12px; padding: 12px 14px; display: grid; gap: 10px; border: 1px dashed var(--border); border-radius: 7px; background: var(--background); font-size: 11px; }
+.mic-preflight.has-error { border-color: var(--destructive); border-style: solid; }
+.mic-preflight.is-collapsed { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted-foreground); }
+.mic-preflight p { margin: 0; display: flex; align-items: center; gap: 6px; }
+.mic-preflight-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.mic-preflight-head strong { display: block; font-size: 12px; }
+.mic-preflight-head em { font-style: normal; font-weight: 500; color: var(--muted-foreground); margin-left: 4px; }
+.mic-preflight-head span { display: block; margin-top: 3px; color: var(--muted-foreground); line-height: 1.45; }
+.mic-preflight-head svg { flex: none; color: var(--primary); }
+.mic-preflight-live { display: grid; gap: 6px; font-weight: 650; }
+.mic-preflight-meter { height: 6px; border-radius: 3px; background: var(--muted); overflow: hidden; }
+.mic-preflight-meter i { display: block; height: 100%; background: var(--primary); transition: width .08s linear; }
+.mic-preflight-result { display: grid; gap: 8px; }
+.mic-preflight-result audio { width: 100%; }
+.mic-preflight-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mic-preflight-actions .secondary-button { min-height: 36px; font-size: 12px; }

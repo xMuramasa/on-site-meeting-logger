@@ -21,6 +21,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "./api";
 import { AudioPreview } from "./AudioPreview";
+import { MicPreflight } from "./MicPreflight";
 import { audioWarning, formatDuration } from "./lib";
 import { useRecorder } from "./useRecorder";
 import { ReviewForm } from "./ReviewForm";
@@ -345,6 +346,7 @@ function App() {
                 {!inputSupported && <p className="inline-error"><AlertCircle size={15} /> Este navegador no permite enumerar ni usar entradas de micrófono.</p>}
                 {!inputLabelsAvailable && inputSupported && <p className="capture-help input-note">Los nombres de los micrófonos aparecerán después de permitir el acceso. Abrir el selector no solicita permiso.</p>}
                 {capture.inputError && <p className="inline-error"><AlertCircle size={15} /> {capture.inputError}</p>}
+                {!capture.recording && inputSupported && <MicPreflight selectedInputId={selectedInputId} disabled={Boolean(capture.starting || capture.stopping || busy)} />}
                 <p className="capture-help">Este selector solo selecciona una entrada de audio; no captura automáticamente el audio del sistema. Si instalaste un dispositivo loopback, podría aparecer aquí. Para una llamada, selecciona una entrada que incluya el audio del sistema o sube la grabación de la plataforma.</p>
                 <div className="or"><span>o selecciona archivos</span></div>
                 <label className="file-drop">
