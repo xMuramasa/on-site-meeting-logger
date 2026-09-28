@@ -4,6 +4,24 @@
 `<output-root>/.meeting-queue.sqlite3`. The schema is migrated with
 `PRAGMA user_version`; version 1 uses WAL plus `synchronous=FULL`.
 
+Jobs are keyed by `meeting_key()` from `meetings.py`: the meeting UUID, or the ISO date for
+legacy meetings without one. The column is still named `meeting_date` for schema compatibility.
+
+## Status API
+
+`GET /api/meetings` and `GET /api/meetings/{id}` read the queue database on every request:
+
+- `queue` is the raw durable record (`queued`, `running`, `failed`, `cancelled`, `completed`,
+  plus `position`, set only while queued, and timestamps), or `null` if never enqueued.
+- `job` is the merged view the UI uses. A running stage wins; otherwise a queued record appears
+  as `{"status": "queued", "position": N}`; otherwise the most recent durable write between the
+  queue terminal state and the stage manifest wins.
+
+`POST /api/meetings/{id}/cancel` cancels a queued record in one transaction and returns
+`{"status": "cancelled"}`; it leaves FIFO order immediately and later positions shift up.
+A running meeting gets the existing cooperative stop request (`cancellation_requested`).
+Cancelling a failed, cancelled, or completed queue record returns 409.
+
 ## Invariants
 
 - Upload acknowledgement must occur only after immutable artifacts, `manifest.json`, and the

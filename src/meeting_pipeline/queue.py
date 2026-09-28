@@ -8,6 +8,9 @@ Queue invariants:
 * A worker can claim only the oldest queued job, and terminal transitions require that claim.
 * Restart recovery returns a stale running claim to queued without changing its sequence.
 
+Jobs are keyed by ``meetings.meeting_key()``: the meeting UUID, or the ISO date for legacy
+meetings. The column keeps its historical ``meeting_date`` name for schema compatibility.
+
 The queue database lives alongside the deployment lock at ``<output-root>/.meeting-queue.sqlite3``.
 The database uses WAL and FULL synchronous mode: acknowledgement can safely depend on a committed
 queue entry after meeting artifacts and the manifest have been persisted.
@@ -160,6 +163,22 @@ class DurableMeetingQueue:
                 "SELECT * FROM meeting_queue_jobs WHERE status = 'queued' ORDER BY sequence"
             ).fetchall()
             return [self._job(row, index) for index, row in enumerate(rows, start=1)]
+
+    def jobs(self) -> dict[str, QueueJob]:
+        """Every durable record keyed by meeting key, with positions from one consistent read."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM meeting_queue_jobs ORDER BY sequence"
+            ).fetchall()
+        result: dict[str, QueueJob] = {}
+        position = 0
+        for row in rows:
+            if row["status"] == "queued":
+                position += 1
+            result[row["meeting_date"]] = self._job(
+                row, position if row["status"] == "queued" else None
+            )
+        return result
 
     def position(self, meeting_date: str) -> int | None:
         job = self.get(meeting_date)

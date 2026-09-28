@@ -7,7 +7,7 @@ import secrets
 import shutil
 from collections.abc import Callable
 from contextlib import suppress
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -39,6 +39,7 @@ from .pipeline import (
     run_stages,
 )
 from .previous_context import SUPPORTED_PREVIOUS_ACTA
+from .queue import DurableMeetingQueue, QueueJob
 from .readiness import ReadinessCheck, ReadinessReport, check_readiness
 from .review import apply_review, draft_hash, load_review
 
@@ -130,12 +131,63 @@ def _first_pending_stage(manifest: Any, until: str) -> str | None:
     return None
 
 
-def _job_for_meeting(path: Path) -> dict[str, Any] | None:
+def _load_optional_manifest(path: Path) -> Any | None:
     try:
-        return _durable_job(load_manifest(path / "manifest.json"))
+        return load_manifest(path / "manifest.json")
     except PipelineError:
         # A review-only legacy directory has no pipeline execution state yet.
         return None
+
+
+def _queue_key(path: Path, manifest: Any | None) -> str:
+    """Queue records use the same identity as the API: UUID, or the legacy date."""
+    return meeting_key(manifest) if manifest is not None else path.name
+
+
+def _queue_record(queued: QueueJob | None) -> dict[str, Any] | None:
+    """Raw durable queue state; ``position`` is set only while the job waits in FIFO order."""
+    if queued is None:
+        return None
+    return {
+        "status": queued.status,
+        "position": queued.position,
+        "enqueued_at": queued.enqueued_at,
+        "finished_at": queued.finished_at,
+    }
+
+
+def _merge_job(queued: QueueJob | None, manifest: Any | None) -> dict[str, Any] | None:
+    """Project job state from the durable queue record and durable stage manifest.
+
+    A live running stage always wins. A queued record wins next so the UI can show its FIFO
+    position. Otherwise the most recent durable write wins: stage state for a meeting that was
+    resumed after its queue record finished, or the queue terminal state (e.g. cancelled before
+    any stage ran).
+    """
+    stage_job = _durable_job(manifest) if manifest is not None else None
+    if queued is None or (stage_job and stage_job["status"] == "running"):
+        return stage_job
+    pending = _first_pending_stage(manifest, "generate_review") if manifest else None
+    if queued.status == "queued":
+        return {"status": "queued", "stage": pending or "inspect", "position": queued.position}
+    if queued.status == "running":
+        return {"status": "running", "stage": pending or "inspect"}
+    if (
+        manifest is not None
+        and stage_job is not None
+        and (
+            queued.status == "completed"
+            or queued.finished_at is None
+            or manifest.updated_at > datetime.fromisoformat(queued.finished_at)
+        )
+    ):
+        return stage_job
+    if queued.status == "completed":
+        return {"status": "complete", "stage": pending or "generate_review"}
+    result: dict[str, Any] = {"status": queued.status, "stage": pending or "inspect"}
+    if queued.status == "failed":
+        result.update(error_code="PROCESSING_FAILED", retryable=True)
+    return result
 
 
 def _artifact_records(path: Path) -> list[dict[str, str | bool]]:
@@ -254,6 +306,7 @@ def create_app(
     """Create an app that can only mutate local pipeline state."""
     root = Path(output_root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    queue = DurableMeetingQueue(root)
     _mark_interrupted_jobs(root)
     incoming = root / ".incoming"
     incoming.mkdir(mode=0o700, exist_ok=True)
@@ -274,6 +327,7 @@ def create_app(
 
     app = FastAPI(title="Meeting Studio", docs_url=None, redoc_url=None)
     app.state.output_root = root
+    app.state.queue = queue
     app.state.csrf_token = token
 
     app.add_middleware(
@@ -352,8 +406,12 @@ def create_app(
                     return legacy
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    def job_for_meeting(path: Path, manifest: Any | None = None) -> dict[str, Any] | None:
+        manifest = manifest if manifest is not None else _load_optional_manifest(path)
+        return _merge_job(queue.get(_queue_key(path, manifest)), manifest)
+
     def reject_active_job(path: Path, manifest: Any | None = None) -> None:
-        job = _durable_job(manifest) if manifest is not None else _job_for_meeting(path)
+        job = job_for_meeting(path, manifest)
         if job and job["status"] == "running":
             raise HTTPException(
                 status_code=409, detail="a pipeline job is already active for this meeting"
@@ -362,7 +420,7 @@ def create_app(
         for other, _ in meeting_records(root):
             if other.resolve() == path.resolve():
                 continue
-            running = _job_for_meeting(other)
+            running = job_for_meeting(other)
             if running and running["status"] == "running":
                 raise HTTPException(
                     status_code=409,
@@ -386,6 +444,7 @@ def create_app(
     @app.get("/api/meetings")
     def list_meetings() -> dict[str, Any]:
         items = []
+        queued = queue.jobs()
         for _, manifest in sorted(
             meeting_records(root), key=lambda record: record[1].created_at, reverse=True
         ):
@@ -397,7 +456,8 @@ def create_app(
                     "date": key,
                     "source": manifest.source_filename,
                     "stages": {name: state.status for name, state in manifest.stages.items()},
-                    "job": _durable_job(manifest),
+                    "job": _merge_job(queued.get(meeting_key(manifest)), manifest),
+                    "queue": _queue_record(queued.get(meeting_key(manifest))),
                 }
             )
         return {"meetings": items}
@@ -477,12 +537,14 @@ def create_app(
         manifest = (
             load_manifest(path / "manifest.json") if (path / "manifest.json").exists() else None
         )
+        queued = queue.get(_queue_key(path, manifest))
         return {
             "id": meeting_key(manifest) if manifest else meeting_date,
             "date": manifest.meeting_date.isoformat() if manifest else meeting_date,
             "title": manifest.title if manifest else None,
             "review_error": review_error,
-            "job": _job_for_meeting(path),
+            "job": _merge_job(queued, manifest),
+            "queue": _queue_record(queued),
             "audio_analysis": audio_analysis,
             "review": review,
             "artifacts": _artifact_records(path),
@@ -581,8 +643,22 @@ def create_app(
     @app.post("/api/meetings/{meeting_date}/cancel", status_code=202)
     def cancel(meeting_date: str) -> dict[str, str]:
         path = meeting_path(meeting_date)
+        manifest = _load_optional_manifest(path)
+        key = _queue_key(path, manifest)
+        day = manifest.meeting_date.isoformat() if manifest is not None else meeting_date
+        # Queued work is removed from FIFO order durably; workers can never claim it afterwards.
+        if queue.cancel(key):
+            return {"id": key, "date": day, "status": "cancelled"}
+        queued = queue.get(key)
+        stage_job = _durable_job(manifest) if manifest is not None else None
+        stage_running = bool(stage_job and stage_job["status"] == "running")
+        if queued is not None and queued.status != "running" and not stage_running:
+            raise HTTPException(
+                status_code=409, detail="only queued or running meetings can be cancelled"
+            )
+        # Running work stops cooperatively at its next checkpoint.
         request_cancellation(path)
-        return {"date": meeting_date, "status": "cancellation_requested"}
+        return {"id": key, "date": day, "status": "cancellation_requested"}
 
     @app.post("/api/meetings/{meeting_date}/restart", status_code=202)
     def restart(meeting_date: str, background: BackgroundTasks) -> dict[str, str]:

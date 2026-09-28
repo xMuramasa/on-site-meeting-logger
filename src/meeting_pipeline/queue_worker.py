@@ -6,8 +6,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .errors import PipelineBusyError
+from .errors import PipelineBusyError, PipelineError
 from .manifest import deployment_lock
+from .meetings import find_meeting
 from .queue import DurableMeetingQueue, QueueJob, QueueStatus
 
 
@@ -81,9 +82,16 @@ class QueueWorker:
         except PipelineBusyError:
             return []
 
+    def _meeting_dir(self, key: str) -> Path:
+        """Resolve a queue key (UUID or legacy date) to its meeting directory."""
+        try:
+            return find_meeting(self.queue.output_root, key)
+        except PipelineError:
+            return self.queue.output_root / key
+
     def _process_claim(self, job: QueueJob, recovered_running: bool) -> QueueWorkOutcome:
         try:
-            self.process_meeting(self.queue.output_root / job.meeting_date)
+            self.process_meeting(self._meeting_dir(job.meeting_date))
         except Exception as exc:
             self.queue.fail(job.meeting_date, str(exc))
             return QueueWorkOutcome(job.meeting_date, "failed", recovered_running)

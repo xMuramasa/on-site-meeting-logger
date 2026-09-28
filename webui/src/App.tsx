@@ -55,11 +55,12 @@ function today() {
 }
 
 function StatusDot({ state }: { state?: string }) {
-  return <span className={`status-dot ${state === "complete" ? "done" : state === "failed" ? "failed" : ""}`} />;
+  return <span className={`status-dot ${state === "complete" ? "done" : state === "failed" ? "failed" : state === "queued" ? "queued" : ""}`} />;
 }
 
 function meetingStatus(item: api.MeetingSummary) {
   if (item.stages.validate === "complete") return "Acta validada · lista para descargar";
+  if (item.job?.status === "queued") return `En cola · posición ${item.job.position ?? "?"} · puedes cancelar`;
   if (item.job?.status === "running") return "Procesando · puedes cancelar";
   if (item.job?.status === "blocked") return "En espera · otra reunión usa los modelos";
   if (item.job?.status === "failed") return "Falló · revisa y reanuda";
@@ -267,7 +268,8 @@ function App() {
     setBusy(true); setError("");
     try {
       await api[action](selected);
-      setNotice(action === "cancel" ? "Cancelación solicitada." : "Procesamiento reanudado.");
+      const queued = detail?.job?.status === "queued";
+      setNotice(action === "cancel" ? (queued ? "Reunión quitada de la cola." : "Cancelación solicitada.") : "Procesamiento reanudado.");
       await refresh();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "No se pudo actualizar el procesamiento");
@@ -364,11 +366,12 @@ function App() {
             </div>
           ) : (
             <div className="meeting-detail">
-              <div className="detail-head"><div><span className="eyebrow accent">REUNIÓN · {detail?.date || current?.date}</span><h1>Revisión del acta</h1><p>Confirma solamente lo que una persona pueda respaldar.</p></div><div className={`job-badge ${detail?.job?.status || "idle"}`}>{detail?.job?.status === "running" && <LoaderCircle className="spin" size={15} />}{detail?.job?.status === "failed" ? "Error" : detail?.job?.status === "running" ? "Procesando" : detail?.job?.status === "blocked" ? "En espera" : current?.stages.validate === "complete" ? "Validada" : "Lista"}</div></div>
+              <div className="detail-head"><div><span className="eyebrow accent">REUNIÓN · {detail?.date || current?.date}</span><h1>Revisión del acta</h1><p>Confirma solamente lo que una persona pueda respaldar.</p></div><div className={`job-badge ${detail?.job?.status || "idle"}`}>{detail?.job?.status === "running" && <LoaderCircle className="spin" size={15} />}{detail?.job?.status === "failed" ? "Error" : detail?.job?.status === "queued" ? `En cola · #${detail.job.position ?? "?"}` : detail?.job?.status === "cancelled" ? "Cancelada" : detail?.job?.status === "running" ? "Procesando" : detail?.job?.status === "blocked" ? "En espera" : current?.stages.validate === "complete" ? "Validada" : "Lista"}</div></div>
 
               {detail?.job?.status === "blocked" && <DeploymentBlocked job={detail.job} busy={busy} restart={() => controlProcessing("restart")} />}
               {detail?.job?.status === "failed" && <ProcessingFailure job={detail.job} busy={busy} restart={() => controlProcessing("restart")} />}
               {detail?.audio_analysis && audioWarning(detail.audio_analysis.classification) && <div className="error-banner"><AlertCircle size={18} /><div><strong>Revisa la fuente de audio</strong><span>{audioWarning(detail.audio_analysis.classification)}</span></div></div>}
+              {detail?.job?.status === "queued" && <div className="queue-banner" role="status"><div><strong>En cola · posición {detail.job.position ?? "?"}</strong><span>{detail.job.position === 1 ? "Es la próxima reunión en procesarse." : `Se procesará después de ${(detail.job.position ?? 1) - 1} reunión(es) en orden de llegada.`}</span></div><button className="secondary-button" disabled={busy} onClick={() => controlProcessing("cancel")}><CircleStop size={16} /> Quitar de la cola</button></div>}
               {detail?.job?.status === "running" && <button className="secondary-button" disabled={busy} onClick={() => controlProcessing("cancel")}><CircleStop size={16} /> Cancelar</button>}
               {detail?.job?.status === "cancelled" && <div className="error-banner"><CircleStop size={18} /><div><strong>Procesamiento cancelado</strong><span>Puedes reanudar desde la última etapa completada.</span></div><button className="secondary-button" disabled={busy} onClick={() => controlProcessing("restart")}><RotateCcw size={16} /> Reanudar</button></div>}
               {detail?.job?.total_chunks ? <p role="status">{detail.job.phase === "consolidate" ? "Consolidando borrador" : `Fragmentos: ${detail.job.completed_chunks || 0} de ${detail.job.total_chunks}`}</p> : null}

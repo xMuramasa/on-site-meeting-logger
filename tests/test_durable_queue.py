@@ -32,6 +32,18 @@ def test_claims_oldest_job_once_and_failure_releases_the_next_job(tmp_path: Path
     assert second.meeting_date == "2026-09-04"
 
 
+def test_jobs_snapshot_reports_positions_only_for_queued_records(tmp_path: Path):
+    queue = DurableMeetingQueue(tmp_path)
+    for key in ("a", "b", "c"):
+        queue.enqueue(key)
+    assert queue.cancel("b")
+
+    jobs = DurableMeetingQueue(tmp_path).jobs()
+
+    assert {key: job.position for key, job in jobs.items()} == {"a": 1, "b": None, "c": 2}
+    assert jobs["b"].status == "cancelled"
+
+
 def test_cancellation_and_restart_recovery_preserve_fifo_sequence(tmp_path: Path):
     queue = DurableMeetingQueue(tmp_path)
     first = queue.enqueue("2026-09-03")

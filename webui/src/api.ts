@@ -37,13 +37,21 @@ export type Review = {
 export type FailureCode = "NO_SPEECH" | "MODEL_UNAVAILABLE" | "AUDIO_DECODE_FAILED" | "STORAGE_UNAVAILABLE" | "JOB_INTERRUPTED" | "PROCESSING_FAILED";
 export type Job = {
   // "blocked" means another meeting holds the local models — a wait, not a failure.
-  status: "running" | "complete" | "failed" | "cancelled" | "blocked";
+  // "queued" waits in the durable FIFO queue; `position` is 1 for the next meeting to run.
+  status: "queued" | "running" | "complete" | "failed" | "cancelled" | "blocked";
   stage: string;
+  position?: number;
   phase?: string;
   completed_chunks?: number;
   total_chunks?: number;
   error_code?: FailureCode;
   retryable?: boolean;
+};
+export type QueueRecord = {
+  status: "queued" | "running" | "failed" | "cancelled" | "completed";
+  position: number | null;
+  enqueued_at: string;
+  finished_at: string | null;
 };
 export type AudioAnalysis = {
   scanned_seconds: number;
@@ -59,6 +67,7 @@ export type MeetingSummary = {
   source: string;
   stages: Record<string, string>;
   job: Job | null;
+  queue?: QueueRecord | null;
 };
 export type MeetingDetail = {
   id?: string;
@@ -66,6 +75,7 @@ export type MeetingDetail = {
   review_error?: string | null;
   date: string;
   job: Job | null;
+  queue?: QueueRecord | null;
   audio_analysis: AudioAnalysis | null;
   review: Review | null;
   artifacts: Artifact[];

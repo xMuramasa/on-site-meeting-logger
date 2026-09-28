@@ -105,6 +105,11 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .job-badge { border-radius: 20px; padding: 8px 13px; display: flex; align-items: center; gap: 6px; background: var(--muted); color: var(--muted-foreground); font-size: 11px; font-weight: 700; }
 .job-badge.running { color: var(--foreground); background: var(--muted); }
 .job-badge.failed { color: var(--destructive); background: #fef2f2; }
+.job-badge.queued { color: #1d4ed8; background: #eff6ff; }
+.status-dot.queued { background: #3b82f6; box-shadow: 0 0 0 4px rgba(59,130,246,.16); }
+.queue-banner { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 0 0 16px; padding: 14px 16px; border: 1px solid #bfdbfe; border-radius: 14px; background: #eff6ff; color: #1e3a8a; }
+.queue-banner div { display: flex; flex-direction: column; gap: 3px; }
+.queue-banner span { font-size: 13px; color: #1e40af; }
 .progress-card { padding: 17px 20px; display: flex; align-items: center; overflow-x: auto; margin-bottom: 22px; }
 .stage { min-width: 106px; flex: 1; display: flex; align-items: center; gap: 9px; position: relative; color: var(--muted-foreground); font-size: 10px; white-space: nowrap; }
 .stage:not(:last-child)::after { content: ""; height: 1px; background: var(--border); flex: 1; margin: 0 9px; }

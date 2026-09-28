@@ -255,6 +255,27 @@ describe("Meeting Studio browser workflows", () => {
     expect(mocks.cancel).toHaveBeenCalledWith("2026-09-03");
   });
 
+  it("shows queue position and removes a queued meeting from the queue", async () => {
+    const queued = { status: "queued" as const, stage: "inspect", position: 2 };
+    mocks.meetings.mockResolvedValue([summary({ job: queued })]);
+    mocks.meeting.mockResolvedValue(detail({ job: queued, review: null }));
+    await renderApp();
+
+    expect(container.textContent).toContain("En cola · posición 2 · puedes cancelar");
+    await click(button("3 sept"));
+    expect(container.textContent).toContain("En cola · #2");
+    expect(container.textContent).toContain("Se procesará después de 1 reunión(es) en orden de llegada.");
+
+    mocks.meetings.mockResolvedValue([summary({ job: { status: "cancelled", stage: "inspect" } })]);
+    mocks.meeting.mockResolvedValue(detail({ job: { status: "cancelled", stage: "inspect" }, review: null }));
+    await click(button("Quitar de la cola"));
+
+    expect(mocks.cancel).toHaveBeenCalledWith("2026-09-03");
+    expect(container.textContent).toContain("Reunión quitada de la cola.");
+    expect(container.textContent).toContain("Cancelada · puedes reanudar");
+    expect(container.textContent).not.toContain("Quitar de la cola");
+  });
+
   it("edits evidence review fields and saves the reviewed evidence", async () => {
     mocks.meetings.mockResolvedValue([summary()]);
     await renderApp();
