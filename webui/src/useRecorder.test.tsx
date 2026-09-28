@@ -27,7 +27,10 @@ const wakeLockRequest = vi.fn();
 const wakeLockRelease = vi.fn();
 const wakeLockListeners = new Map<string, () => void>();
 
+let lastRecorder: TestMediaRecorder | null = null;
+
 class TestMediaRecorder {
+  constructor() { lastRecorder = this; }
   static isTypeSupported() { return true; }
   state: "inactive" | "recording" = "inactive";
   mimeType = "audio/webm";
@@ -48,6 +51,8 @@ function Probe() {
     <output data-testid="labels">{String(recorder.inputLabelsAvailable)}</output>
     <output data-testid="recording">{String(recorder.recording)}</output>
     <output data-testid="wake-lock-warning">{recorder.wakeLockWarning}</output>
+    <output data-testid="storage">{JSON.stringify(recorder.storage)}</output>
+    <output data-testid="error">{recorder.error}</output>
     <button type="button" data-action="select" onClick={() => recorder.selectInput("usb-mic")}>Seleccionar USB</button>
     <button type="button" data-action="start" onClick={() => void recorder.start()}>Grabar</button>
     <button type="button" data-action="stop" onClick={recorder.stop}>Detener</button>
@@ -219,5 +224,38 @@ describe("useRecorder screen wake lock", () => {
     await waitFor(() => wakeLockRequest.mock.calls.length === 2);
 
     expect(wakeLockRequest).toHaveBeenNthCalledWith(2, "screen");
+  });
+});
+
+describe("useRecorder storage and input loss", () => {
+  it("reports recording capacity from the browser storage estimate", async () => {
+    enumerateDevices.mockResolvedValue([]);
+    Object.defineProperty(navigator, "storage", {
+      configurable: true,
+      value: { estimate: vi.fn().mockResolvedValue({ quota: 1_200_000, usage: 240_000 }) },
+    });
+
+    await renderProbe();
+    await waitFor(() => container.querySelector('[data-testid="storage"]')?.textContent?.includes("available") || false);
+
+    expect(JSON.parse(container.querySelector('[data-testid="storage"]')?.textContent || "{}")).toEqual({
+      status: "available", availableBytes: 960_000, recordingSeconds: 10,
+    });
+    Object.defineProperty(navigator, "storage", { configurable: true, value: undefined });
+  });
+
+  it("stops the recorder and explains recovery when the microphone disconnects", async () => {
+    enumerateDevices.mockResolvedValue([]);
+    const listeners = new Map<string, () => void>();
+    getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn(), addEventListener: (event: string, listener: () => void) => listeners.set(event, listener) }] });
+    await renderProbe();
+    await act(async () => (container.querySelector('[data-action="start"]') as HTMLButtonElement).click());
+    await waitFor(() => container.querySelector('[data-testid="recording"]')?.textContent === "true");
+
+    await act(async () => listeners.get("ended")?.());
+    await waitFor(() => container.querySelector('[data-testid="recording"]')?.textContent === "false");
+
+    expect(lastRecorder?.state).toBe("inactive");
+    expect(container.querySelector('[data-testid="error"]')?.textContent).toContain("El micrófono se desconectó");
   });
 });

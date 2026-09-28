@@ -332,6 +332,7 @@ function App() {
                   </div>
                   {audioSource === "recording" && selectedAudio && <button type="button" className="text-button" disabled={busy || capture.stopping} onClick={() => { capture.discard(); setSelectedAudio(null); setAudioSource(null); }}><RotateCcw size={14} /> Descartar</button>}
                 </div>
+                {!capture.recording && capture.storage && <p className="storage-capacity" role="status">{capture.storage.status === "available" ? <>Espacio del navegador para grabar: {(capture.storage.availableBytes / 1_073_741_824).toFixed(1)} GB · capacidad aproximada de guardado local: {formatDuration(capture.storage.recordingSeconds)}.</> : <>Este navegador no informa cuánto espacio queda para el guardado local.</>}</p>}
                 <p role="status">{capture.starting ? "Preparando micrófono y guardado local…" : capture.stopping ? "Guardando grabación…" : capture.recording ? `Guardado local: ${formatDuration(capture.savedSeconds || 0)}` : ""}</p><div className="input-selector">
                   <label htmlFor="microphone-input"><span>Entrada de micrófono</span><select id="microphone-input" aria-label="Entrada de micrófono" value={selectedInputId} disabled={capture.recording || capture.starting || capture.stopping || busy || !inputSupported} onChange={(event) => capture.selectInput(event.target.value)}>
                     <option value="default">Entrada predeterminada del sistema</option>

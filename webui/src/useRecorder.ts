@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LiveAudioDiagnostics, liveAudioWarning } from "./audioDiagnostics";
 import { audioWarning, recordingExtension } from "./lib";
+import { storageEstimateState, type StorageEstimateState } from "./recordingCapacity";
 import { startRecovery } from "./recordingRecovery";
 import { discardRecording, listRecordings, recoverRecording, type RecordingSession } from "./recordingStore";
 
@@ -35,7 +36,17 @@ export function useRecorder() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const recovery = useRef<Awaited<ReturnType<typeof startRecovery>> | null>(null);
-  const refreshSessions = useCallback(() => { void listRecordings().then(setSessions).catch(() => {}); }, []);
+  const [storage, setStorage] = useState<StorageEstimateState>({ status: "unknown" });
+  const refreshStorage = useCallback(() => {
+    if (!navigator.storage?.estimate) return;
+    void navigator.storage.estimate()
+      .then((value) => setStorage(storageEstimateState(value)))
+      .catch(() => setStorage({ status: "unknown" }));
+  }, []);
+  const refreshSessions = useCallback(() => {
+    void listRecordings().then(setSessions).catch(() => {});
+    refreshStorage();
+  }, [refreshStorage]);
   useEffect(refreshSessions, [refreshSessions]);
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -211,6 +222,13 @@ export function useRecorder() {
       });
       if (session.current !== currentSession) { await recovery.current.finish(); cleanup(); return; }
       setSessionId(recovery.current.session.id);
+      // A disconnected input ends its tracks without a MediaRecorder error; stop so saved blocks stay recoverable.
+      media.getTracks().forEach((track) => track.addEventListener?.("ended", () => {
+        if (session.current !== currentSession || instance.state !== "recording") return;
+        setError("El micrófono se desconectó. La grabación se detuvo y el audio guardado sigue disponible para recuperación.");
+        setStopping(true);
+        instance.stop();
+      }));
       if (!recovery.current.session.persistent) setWarning("El navegador no garantizó almacenamiento persistente. Descarga la grabación al terminar.");
       await context.resume();
       const analyser = context.createAnalyser();
@@ -271,7 +289,7 @@ export function useRecorder() {
   };
   return {
     recording, elapsed, level, file, error, warning, wakeLockWarning, start, stop, discard,
-    savedSeconds, sessions, sessionId, stopping, starting,
+    savedSeconds, sessions, sessionId, stopping, starting, storage,
     async recover(id: string) {
       try { setFile(await recoverRecording(id)); setSessionId(id); }
       catch (reason) { setError(recorderErrorMessage(reason)); }

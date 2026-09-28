@@ -187,3 +187,4 @@ fieldset.evidence-workspace { min-width: 0; }
 .claim-editor > strong { font-size: 13px; }
 .claim-editor textarea { font-size: 14px; line-height: 1.55; }
 .action-fields label, .evidence-range label, .claim-editor details { font-size: 13px; }
+.storage-capacity { margin: 10px 0 0; padding: 8px 10px; color: var(--muted-foreground); background: color-mix(in srgb, var(--accent) 42%, transparent); border-radius: 7px; font-size: 11px; line-height: 1.45; }
